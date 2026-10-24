@@ -186,7 +186,7 @@ main { padding: 20px; min-width: 0; }
 .report-actions { margin-bottom: 12px; }
 
 .ask-form { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
-.ask-form input { flex: 1; min-width: 240px; }
+.ask-form > input { flex: 1; min-width: 240px; }
 .answer { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; }
 .answer .direct { font-size: 15px; margin-bottom: 10px; }
 .evidence { list-style: none; padding: 0; display: grid; gap: 6px; }
