@@ -14,7 +14,7 @@ e li conserva come memoria verificabile, sempre collegata alla frase da cui deri
 
 <img src="docs/screenshots/demo-live.gif" alt="Demo: trascrizione live, alert e scheda che si compilano durante la chiamata" width="900">
 
-*HacktoberfestMLH26 · [Gruppo Telegram](https://t.me/+0vPSzpntHicyOGQ0)*
+*HacktoberfestMLH26
 
 </div>
 
