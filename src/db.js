@@ -150,6 +150,30 @@ CREATE TABLE IF NOT EXISTS metrics (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Reference documents (price lists, contracts, notes): authorised sources
+-- used by search and by post-call verification, never confused with speech.
+CREATE TABLE IF NOT EXISTS documents (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id TEXT NOT NULL REFERENCES users(id),
+  project TEXT NOT NULL DEFAULT 'default',
+  title TEXT NOT NULL,
+  filename TEXT,
+  mime TEXT,
+  chars INT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_documents_owner ON documents (owner_id, project);
+
+CREATE TABLE IF NOT EXISTS document_chunks (
+  id TEXT PRIMARY KEY,
+  document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  seq INT NOT NULL,
+  text TEXT NOT NULL,
+  embedding vector(${config.embedDim})
+);
+CREATE INDEX IF NOT EXISTS idx_chunks_doc ON document_chunks (document_id, seq);
+CREATE INDEX IF NOT EXISTS idx_chunks_hnsw ON document_chunks USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+
 INSERT INTO users (id, name) VALUES ('luca', 'Luca'), ('giulia', 'Giulia')
   ON CONFLICT (id) DO NOTHING;
 `;
@@ -158,7 +182,7 @@ export async function createDb({ inMemory = false } = {}) {
   let client;
   if (config.databaseUrl && !inMemory) {
     const { default: pg } = await import('pg');
-    const pool = new pg.Pool({ connectionString: config.databaseUrl });
+    const pool = new pg.Pool({ connectionString: config.databaseUrl, max: Number(process.env.PG_POOL_MAX || 10) });
     client = {
       kind: 'postgres',
       query: (sql, params) => pool.query(sql, params),

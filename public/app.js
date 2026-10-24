@@ -58,6 +58,7 @@ async function boot() {
   const opts = state.templates.map((t) => `<option value="${t.id}">${esc(t.name)} (v${t.version})</option>`).join('');
   $('#template-select').innerHTML = opts;
   $('#live-template').innerHTML = opts;
+  document.querySelectorAll('.tpl-options').forEach((s) => { s.innerHTML = opts; });
 
   const scenarios = await api('/api/scenarios');
   state.scenarios = scenarios;
@@ -71,7 +72,13 @@ async function boot() {
   $('#live-template').onchange = changeTemplate;
   $('#ask-form').onsubmit = ask;
   $('#tpl-save').onclick = saveTemplate;
-  document.querySelectorAll('.tabs button').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+  document.querySelectorAll('.tabs button[data-tab]').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
+  document.querySelectorAll('.tabs button[data-atab]').forEach((b) => { b.onclick = () => showArchiveTab(b.dataset.atab); });
+  $('#btn-archive').onclick = openArchive;
+  document.querySelectorAll('.seed-btn').forEach((b) => { b.onclick = seedDemo; });
+  $('#gsearch-form').onsubmit = globalSearch;
+  $('#doc-form').onsubmit = addDocument;
+  $('#import-form').onsubmit = importConversation;
 
   renderHealth();
   setInterval(renderHealth, 15000);
@@ -136,6 +143,8 @@ async function openSession(id) {
   const match = state.scenarios?.find((s) => s.template === state.data.session.template_id);
   if (match) $('#scenario').value = match.id;
   $('#empty').hidden = true;
+  $('#archive').hidden = true;
+  $('#btn-archive').classList.remove('active');
   $('#session').hidden = false;
   connectWs();
   loadSessions();
@@ -150,6 +159,8 @@ function closeSession() {
   state.data = null;
   state.partials.clear();
   $('#session').hidden = true;
+  $('#archive').hidden = true;
+  $('#btn-archive').classList.remove('active');
   $('#empty').hidden = false;
 }
 
@@ -556,6 +567,10 @@ function renderReport() {
       ${r.topics?.length ? `<p class="small muted">Argomenti: ${r.topics.map(esc).join(' · ')}</p>` : ''}
       <p class="small">Completezza campi obbligatori: <b>${Math.round(r.completeness * 100)}%</b> · ${r.stats.segments} segmenti · ${r.stats.items} elementi · ${r.stats.gaps} interruzioni</p>`),
     sec('Scheda', `<table class="fields">${r.fields.map((f) => `<tr><td>${esc(f.label)}${f.required ? ' <span class="req">*</span>' : ''}</td><td>${esc(f.value ?? '—')} <span class="st st-${f.status}">${STATUS_LABEL[f.status]}</span></td></tr>`).join('')}</table>`),
+    r.document_refs?.length ? sec('Confronto con i documenti di riferimento', `${r.document_refs.map((d) => `
+      <div class="item"><div class="content">${esc(d.label)}: «${esc(d.value)}» <span class="small muted">(detto in chiamata)</span></div>
+        <div class="chunk"><span class="sid">📄 ${esc(d.document_title)} · similarità ${d.similarity}</span>\n${esc(d.text)}</div></div>`).join('')}
+      <p class="small muted">Passaggi dei documenti più vicini a ciascun valore, affiancati per la verifica umana: il sistema non decide da solo chi ha ragione.</p>`) : '',
     r.cross_session?.length ? sec('Confronto con conversazioni precedenti', `<ul>${r.cross_session.map((c) => `<li><b>${esc(c.field_key)}</b>: prima «${esc(c.previous.value)}» (${esc(c.previous.session_title)}) → ora «${esc(c.current.value)}» <span class="st st-${c.current.status}">${STATUS_LABEL[c.current.status]}</span></li>`).join('')}</ul><p class="small muted">Entrambe le versioni sono conservate; nessun dato precedente viene sovrascritto.</p>`) : '',
     sec('Da verificare prima di decidere', list(r.to_verify)),
     sec('Impegni', list(r.commitments)),
@@ -598,15 +613,183 @@ async function ask(e) {
       method: 'POST',
       body: { question: $('#ask-q').value, session_id: scope === 'session' ? state.sessionId : null, project: scope === 'project' ? state.data.session.project : null },
     });
-    const cited = new Set(r.citations);
-    $('#answer').innerHTML = `<div class="answer">
-      <div class="direct">${esc(r.answer)}</div>
-      <p class="small">Evidenze sufficienti: <b>${r.sufficient_evidence ? 'sì' : 'no'}</b> · confidenza: <b>${esc(r.confidence)}</b>${r.confidence_reason ? ` — ${esc(r.confidence_reason)}` : ''} · modalità: ${esc(r.mode)}</p>
-      ${r.missing_information?.length ? `<p class="small">Informazioni mancanti: ${r.missing_information.map(esc).join('; ')}</p>` : ''}
-      ${r.evidence.length ? `<h3>Evidenze</h3><ol class="evidence">${r.evidence.map((ev, idx) => `<li class="${cited.has(ev.id) ? 'cited' : ''}"><b>#${idx + 1}</b> ${esc(ev.text)}<div class="small muted">${esc(ev.speaker)} · ${esc(ev.session_title)} · ${new Date(ev.created_at).toLocaleString('it-IT')} · match ${esc(ev.match)}${ev.similarity != null ? ` (${ev.similarity})` : ''}</div></li>`).join('')}</ol>` : ''}
-      ${r.related_items?.length ? `<h3>Elementi collegati e stato di verifica</h3>${r.related_items.map((i) => itemHtml(i, { actions: false })).join('')}` : ''}
-    </div>`;
+    $('#answer').innerHTML = answerHtml(r);
+    bindEvidence($('#answer'));
   } catch (err) { $('#answer').innerHTML = `<p class="req">${esc(err.message)}</p>`; }
+}
+
+function evidenceHtml(list, cited = new Set()) {
+  return `<ol class="evidence">${list.map((ev, idx) => `<li class="${cited.has(ev.id) ? 'cited' : ''}">
+    <b>#${idx + 1}</b> <span class="src-tag src-${ev.kind}">${ev.kind}</span>${esc(ev.text)}
+    <div class="small muted">${ev.kind === 'documento'
+      ? `📄 ${esc(ev.document_title)}`
+      : `${esc(ev.speaker)} · <a href="#" data-open-session="${ev.session_id}">${esc(ev.session_title)}</a>`}
+      · ${new Date(ev.created_at).toLocaleString('it-IT')} · match ${esc(ev.match)}${ev.similarity != null ? ` (${ev.similarity})` : ''}</div></li>`).join('')}</ol>`;
+}
+
+function answerHtml(r) {
+  return `<div class="answer">
+    <div class="direct">${esc(r.answer)}</div>
+    <p class="small">Evidenze sufficienti: <b>${r.sufficient_evidence ? 'sì' : 'no'}</b> · confidenza: <b>${esc(r.confidence)}</b>${r.confidence_reason ? ` — ${esc(r.confidence_reason)}` : ''} · modalità: ${esc(r.mode)}</p>
+    ${r.missing_information?.length ? `<p class="small">Informazioni mancanti: ${r.missing_information.map(esc).join('; ')}</p>` : ''}
+    ${r.evidence.length ? `<h3>Evidenze</h3>${evidenceHtml(r.evidence, new Set(r.citations))}` : ''}
+    ${r.related_items?.length ? `<h3>Elementi collegati e stato di verifica</h3>${r.related_items.map((i) => itemHtml(i, { actions: false })).join('')}` : ''}
+  </div>`;
+}
+
+function bindEvidence(root) {
+  root.querySelectorAll('[data-open-session]').forEach((a) => {
+    a.onclick = (e) => { e.preventDefault(); openSession(a.dataset.openSession); };
+  });
+}
+
+// ---------------------------------------------------------------- archive
+
+async function openArchive() {
+  closeSession();
+  $('#empty').hidden = true;
+  $('#archive').hidden = false;
+  $('#btn-archive').classList.add('active');
+  await loadProjects();
+  renderDocuments();
+}
+
+function showArchiveTab(name) {
+  document.querySelectorAll('.tabs button[data-atab]').forEach((b) => b.classList.toggle('active', b.dataset.atab === name));
+  document.querySelectorAll('.atab').forEach((t) => { t.hidden = t.id !== `atab-${name}`; });
+  if (name === 'docs') renderDocuments();
+}
+
+async function loadProjects() {
+  const projects = await api('/api/projects');
+  const sel = $('#gsearch-project');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">Tutti i progetti</option>' + projects.map((p) => `<option value="${esc(p.project)}">${esc(p.project)} (${p.sessions} conv., ${p.documents} doc.)</option>`).join('');
+  sel.value = cur;
+  $('#project-list').innerHTML = projects.map((p) => `<option value="${esc(p.project)}">`).join('');
+}
+
+async function globalSearch(e) {
+  e.preventDefault();
+  const mode = e.submitter?.value || 'ask';
+  const body = {
+    project: $('#gsearch-project').value || null,
+    include_conversations: $('#gsearch-conv').checked,
+    include_documents: $('#gsearch-docs').checked,
+  };
+  const out = $('#gsearch-out');
+  out.innerHTML = `<p class="muted">${mode === 'ask' ? 'Cerco le evidenze e chiedo a Gemma…' : 'Cerco…'}</p>`;
+  try {
+    if (mode === 'ask') {
+      const r = await api('/api/ask', { method: 'POST', body: { ...body, question: $('#gsearch-q').value } });
+      out.innerHTML = answerHtml(r);
+    } else {
+      const list = await api('/api/search', { method: 'POST', body: { ...body, query: $('#gsearch-q').value } });
+      out.innerHTML = list.length ? `<div class="answer"><h3>${list.length} risultati</h3>${evidenceHtml(list)}</div>` : '<p class="muted">Nessun risultato.</p>';
+    }
+    bindEvidence(out);
+  } catch (err) { out.innerHTML = `<p class="req">${esc(err.message)}</p>`; }
+}
+
+async function renderDocuments() {
+  const docs = await api('/api/documents');
+  $('#doc-count').textContent = `${docs.length}`;
+  $('#doc-list').innerHTML = docs.map((d) => `
+    <li data-doc="${d.id}">
+      <div><b>${esc(d.title)}</b><div class="small muted">${esc(d.project)} · ${d.chunks} blocchi (${d.embedded} indicizzati) · ${Math.round(d.chars / 100) / 10}k caratteri${d.filename ? ` · ${esc(d.filename)}` : ''}</div></div>
+      <button class="small ghost" data-del-doc="${d.id}" title="Elimina documento">✕</button>
+    </li>`).join('') || '<li class="muted">Nessun documento. Aggiungine uno o carica i dati demo.</li>';
+  $('#doc-list').querySelectorAll('li[data-doc]').forEach((li) => {
+    li.onclick = async (e) => {
+      if (e.target.closest('[data-del-doc]')) return;
+      $('#doc-list').querySelectorAll('li').forEach((x) => x.classList.toggle('active', x === li));
+      const d = await api(`/api/documents/${li.dataset.doc}`);
+      $('#doc-view').innerHTML = `<h3 style="margin-top:14px">${esc(d.title)}</h3>${d.chunks.map((c) => `<div class="chunk"><span class="sid">blocco ${c.seq}</span>\n${esc(c.text)}</div>`).join('')}`;
+    };
+  });
+  $('#doc-list').querySelectorAll('[data-del-doc]').forEach((b) => {
+    b.onclick = async () => {
+      if (b.dataset.confirm !== '1') { b.dataset.confirm = '1'; b.textContent = 'Conferma'; setTimeout(() => { b.dataset.confirm = ''; b.textContent = '✕'; }, 3000); return; }
+      await api(`/api/documents/${b.dataset.delDoc}`, { method: 'DELETE' });
+      $('#doc-view').innerHTML = '';
+      toast('Documento e indici eliminati', 'ok');
+      renderDocuments();
+      loadProjects();
+    };
+  });
+}
+
+const fileToBase64 = (file) => new Promise((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).split(',')[1]);
+  r.onerror = () => reject(r.error);
+  r.readAsDataURL(file);
+});
+
+async function addDocument(e) {
+  e.preventDefault();
+  const f = e.target;
+  const file = f.file.files[0];
+  if (!file && !f.text.value.trim()) return toast('Scegli un file o incolla del testo', 'high');
+  const btn = f.querySelector('button');
+  btn.disabled = true;
+  btn.textContent = 'Indicizzazione…';
+  try {
+    const body = { title: f.title.value || file?.name, project: f.project.value };
+    if (file) Object.assign(body, { filename: file.name, mime: file.type, content_base64: await fileToBase64(file) });
+    else body.text = f.text.value;
+    const d = await api('/api/documents', { method: 'POST', body });
+    toast(`Aggiunto «${d.title}»: ${d.chunks} blocchi, ${d.embedded} indicizzati semanticamente`, 'ok');
+    f.reset();
+    f.project.value = body.project;
+    renderDocuments();
+    loadProjects();
+  } catch (err) { toast(err.message, 'high'); } finally {
+    btn.disabled = false;
+    btn.textContent = 'Aggiungi all\'archivio';
+  }
+}
+
+async function importConversation(e) {
+  e.preventDefault();
+  const f = e.target;
+  try {
+    const s = await api('/api/sessions/import', {
+      method: 'POST',
+      body: {
+        title: f.title.value, project: f.project.value, templateId: f.templateId.value, text: f.text.value,
+        date: f.date.value ? new Date(f.date.value).toISOString() : null,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, consent: f.consent.checked,
+      },
+    });
+    toast(`Importate ${s.lines} battute: elaborazione in corso`, 'ok');
+    f.reset();
+    await loadSessions();
+    openSession(s.id); // watch the pipeline fill the cards live
+  } catch (err) { toast(err.message, 'high'); }
+}
+
+async function seedDemo() {
+  const btns = document.querySelectorAll('.seed-btn');
+  btns.forEach((b) => { b.disabled = true; b.textContent = 'Caricamento…'; });
+  const logEl = document.querySelectorAll('.seed-log');
+  try {
+    await api('/api/demo/seed', { method: 'POST' });
+    for (;;) {
+      const job = await api('/api/demo/seed');
+      logEl.forEach((el) => { el.textContent = job.log.join('\n'); });
+      if (!job.running) {
+        if (job.error) throw new Error(job.error);
+        toast(`Dati demo: ${job.result.documents} documenti e ${job.result.conversations} conversazioni caricati (${job.result.skipped} già presenti)`, 'ok');
+        break;
+      }
+      await loadSessions();
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    await loadSessions();
+  } catch (err) { toast(err.message, 'high'); } finally {
+    btns.forEach((b) => { b.disabled = false; b.textContent = 'Carica dati demo'; });
+  }
 }
 
 async function renderMetrics() {

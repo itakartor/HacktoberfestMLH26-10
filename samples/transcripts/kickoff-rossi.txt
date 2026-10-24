@@ -1,0 +1,9 @@
+Io: Buongiorno Marco, questa è la chiamata di avvio per capire il progetto del nuovo sito.
+Marco: Buongiorno. Siamo Rossi Arredamenti, abbiamo quaranta rivenditori e vorremmo un sito con il catalogo completo.
+Io: Vi serve anche un'area riservata per i rivenditori?
+Marco: Sì, ci servirebbe un'area riservata con i listini dedicati.
+Marco: Come budget avevamo pensato a circa quarantamila euro.
+Io: Avete già una data di consegna in mente?
+Marco: Ci piacerebbe essere online per la fine di novembre.
+Io: Perfetto, vi preparo una prima proposta e ci risentiamo la settimana prossima.
+Marco: Va bene, ma il preventivo lo deve approvare la direzione.

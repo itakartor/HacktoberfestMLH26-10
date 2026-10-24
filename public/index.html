@@ -23,6 +23,7 @@
 
   <div class="layout">
     <aside class="sidebar">
+      <button id="btn-archive" class="archive-btn">🔎 Archivio · documenti · ricerca</button>
       <details id="new-session-box" open>
         <summary>Nuova conversazione</summary>
         <form id="new-session">
@@ -49,6 +50,76 @@
           <li>Guarda trascrizione, schede, domande suggerite e alert in tempo reale.</li>
           <li>Termina la chiamata per ottenere il report post-chiamata.</li>
         </ol>
+        <div class="seed-box">
+          <p>Archivio vuoto? Carica <b>dati di partenza</b>: 4 documenti di riferimento (listino, contratto, scheda cliente,
+            piano di progetto) e 4 conversazioni passate su due progetti, elaborate da Gemma.</p>
+          <button class="seed-btn primary">Carica dati demo</button>
+          <div class="seed-log small muted"></div>
+        </div>
+      </section>
+
+      <section id="archive" hidden>
+        <div class="session-head">
+          <div>
+            <h2>Archivio</h2>
+            <div class="meta">Ricerca su tutte le conversazioni e sui documenti di riferimento · solo i tuoi dati</div>
+          </div>
+        </div>
+        <nav class="tabs" role="tablist">
+          <button data-atab="search" class="active">Ricerca generale</button>
+          <button data-atab="docs">Documenti</button>
+          <button data-atab="import">Importa conversazione</button>
+        </nav>
+
+        <div class="atab" id="atab-search">
+          <form id="gsearch-form" class="ask-form">
+            <input id="gsearch-q" placeholder="Es. Qual è il budget del cliente Rossi e cosa dice il listino?" required>
+            <select id="gsearch-project"><option value="">Tutti i progetti</option></select>
+            <label class="check"><input type="checkbox" id="gsearch-conv" checked> conversazioni</label>
+            <label class="check"><input type="checkbox" id="gsearch-docs" checked> documenti</label>
+            <button class="primary" name="mode" value="ask">Chiedi a Gemma</button>
+            <button name="mode" value="search">Solo ricerca</button>
+          </form>
+          <div id="gsearch-out"></div>
+        </div>
+
+        <div class="atab" id="atab-docs" hidden>
+          <div class="two-col">
+            <form id="doc-form" class="panel stack">
+              <h3>Aggiungi documento o testo</h3>
+              <label>Titolo <input name="title" placeholder="Es. Listino prezzi 2026"></label>
+              <label>Progetto <input name="project" value="default" required list="project-list"></label>
+              <label>File (.txt .md .csv .json .pdf) <input type="file" name="file" accept=".txt,.md,.markdown,.csv,.json,.pdf"></label>
+              <label>…oppure incolla il testo <textarea name="text" rows="8" placeholder="Note, condizioni, verbali, email…"></textarea></label>
+              <button class="primary">Aggiungi all'archivio</button>
+              <p class="small muted">Il testo viene diviso in blocchi, indicizzato (testo + embedding) e usato come <b>fonte di riferimento</b>:
+                nella ricerca e nel report è sempre distinto da ciò che è stato detto nelle chiamate.</p>
+            </form>
+            <div class="panel">
+              <div class="panel-head"><h3>Documenti</h3><span id="doc-count" class="pill"></span></div>
+              <ul id="doc-list" class="doc-list"></ul>
+              <div id="doc-view"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="atab" id="atab-import" hidden>
+          <form id="import-form" class="panel stack" style="max-width: 820px">
+            <h3>Importa una conversazione passata da testo</h3>
+            <p class="small muted">Una battuta per riga nel formato <code>Nome: testo</code> (sono accettati anche orari tipo <code>[10:02] Nome: testo</code>).
+              Passa nella stessa pipeline dell'audio live: estrazione con Gemma, regole, report e confronto con le altre conversazioni del progetto.</p>
+            <div class="row3">
+              <label>Titolo <input name="title" required placeholder="Es. Call con fornitore 3 ottobre"></label>
+              <label>Progetto <input name="project" value="default" required list="project-list"></label>
+              <label>Template <select name="templateId" class="tpl-options"></select></label>
+              <label>Data della conversazione <input type="datetime-local" name="date"></label>
+            </div>
+            <label>Trascrizione <textarea name="text" rows="12" required placeholder="Marco: Il budget è di quarantamila euro.&#10;Io: Ti mando il preventivo entro venerdì."></textarea></label>
+            <label class="check"><input type="checkbox" name="consent" required> La conversazione è stata registrata/trascritta con autorizzazione</label>
+            <button class="primary">Importa ed elabora</button>
+          </form>
+        </div>
+        <datalist id="project-list"></datalist>
       </section>
 
       <section id="session" hidden>

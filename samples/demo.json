@@ -1,0 +1,15 @@
+{
+  "description": "Dati di partenza: documenti di riferimento e conversazioni passate, in ordine cronologico per mostrare il confronto tra sessioni.",
+  "documents": [
+    { "file": "documents/listino-prezzi-2026.md", "title": "Listino prezzi 2026", "project": "sito-rossi" },
+    { "file": "documents/condizioni-contrattuali.md", "title": "Condizioni contrattuali standard", "project": "sito-rossi" },
+    { "file": "documents/scheda-cliente-rossi.md", "title": "Scheda cliente Rossi Arredamenti", "project": "sito-rossi" },
+    { "file": "documents/piano-progetto-app.md", "title": "Piano di progetto app mobile", "project": "app-mobile" }
+  ],
+  "conversations": [
+    { "transcript": "transcripts/kickoff-rossi.txt", "title": "Kickoff sito Rossi", "project": "sito-rossi", "template": "commerciale", "date": "2026-10-12T09:30:00+02:00" },
+    { "scenario": "preventivo-a", "project": "sito-rossi", "date": "2026-10-20T10:00:00+02:00" },
+    { "scenario": "preventivo-b", "project": "sito-rossi", "date": "2026-10-23T15:00:00+02:00" },
+    { "scenario": "riunione-progetto", "project": "app-mobile", "date": "2026-10-22T09:00:00+02:00" }
+  ]
+}

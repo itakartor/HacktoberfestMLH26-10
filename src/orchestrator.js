@@ -11,6 +11,29 @@ export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+const SPEAKER_LINE = /^\s*(?:[-*•]\s*)?(?:\[?\(?\d{1,2}:\d{2}(?::\d{2})?\]?\)?\s*)?([\p{L}][\p{L}\p{N} .'’-]{0,39}?)\s*[:：]\s+(.+)$/u;
+
+/** "Nome: testo" lines → [{speaker, text}]; unlabeled prose is split into sentences. */
+export function parseTranscript(text) {
+  const out = [];
+  for (const raw of String(text ?? '').replace(/\r/g, '').split('\n')) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = line.match(SPEAKER_LINE);
+    if (m) out.push({ speaker: m[1].trim(), text: m[2].trim() });
+    else if (out.length && out.at(-1).text.length < 600) out.at(-1).text += ` ${line}`;
+    else out.push({ speaker: 'Sconosciuto', text: line });
+  }
+  // A single unlabeled block: split into ~2-sentence segments so sources stay precise.
+  return out.flatMap((l) => {
+    if (l.text.length < 400) return [l];
+    const sentences = l.text.split(/(?<=[.!?])\s+/);
+    const parts = [];
+    for (let i = 0; i < sentences.length; i += 2) parts.push({ speaker: l.speaker, text: sentences.slice(i, i + 2).join(' ') });
+    return parts;
+  });
+}
+
 const STATUSES = ['non_specificato', 'ambiguo', 'da_verificare', 'confermato', 'contestato', 'superato'];
 const STOPWORDS = new Set('alla allo agli alle dalla dello della delle degli dove come cosa quale quali quando quanto questo questa quello quella sono siamo erano avevo aveva hanno abbiamo stato stata per con tra fra che chi non una uno del dei nel nei sul sui gli era'.split(' '));
 
@@ -472,11 +495,12 @@ export class Orchestrator {
   // ----------------------------------------------------------------- search
 
   /** Natural-language Q&A over the owner's archive, always with sources (TC11). */
-  async ask(ownerId, question, { project = null, sessionId = null } = {}) {
+  async ask(ownerId, question, { project = null, sessionId = null, includeConversations = true, includeDocuments = true } = {}) {
     if (!question?.trim()) throw new HttpError(400, 'domanda mancante');
-    if (sessionId) await this.getSession(ownerId, sessionId);
+    // Documents are scoped by project: in a session, use that session's project.
+    const docProject = sessionId ? (await this.getSession(ownerId, sessionId)).project : project;
     const t0 = performance.now();
-    const evidence = await this.#retrieve(ownerId, question, { project, sessionId });
+    const evidence = await this.#retrieve(ownerId, question, { project, sessionId, docProject, includeConversations, includeDocuments });
     if (!evidence.length) {
       return { answer: 'Non ci sono evidenze sufficienti nell\'archivio per rispondere in modo affidabile.', sufficient_evidence: false, citations: [], evidence: [], related_items: [], confidence: 'bassa', mode: 'nessuna_evidenza' };
     }
@@ -504,44 +528,68 @@ export class Orchestrator {
     }
   }
 
-  async #retrieve(ownerId, question, { project, sessionId }) {
-    // Authorization filter is part of every query, applied BEFORE ranking.
-    const scope = `s.owner_id = $1 AND ($2::text IS NULL OR s.project = $2) AND ($3::uuid IS NULL OR s.id = $3)`;
-    const params = [ownerId, project, sessionId];
-    const results = new Map();
-
-    const words = normalize(question).split(' ').filter((w) => w.length > 3 && !STOPWORDS.has(w));
-    if (words.length) {
-      const patterns = words.map((w) => `%${w.slice(0, Math.max(4, w.length - 2))}%`);
-      const { rows } = await this.db.query(
-        `SELECT g.id, g.text, g.speaker, g.created_at, g.session_id, s.title AS session_title,
-           (SELECT COUNT(*) FROM unnest($4::text[]) p WHERE g.text ILIKE p)::int AS hits
-         FROM segments g JOIN sessions s ON s.id = g.session_id
-         WHERE ${scope} AND g.text ILIKE ANY($4::text[]) ORDER BY hits DESC, g.created_at DESC LIMIT 12`,
-        [...params, patterns]);
-      for (const r of rows) results.set(r.id, { ...r, score: 0.15 + 0.15 * r.hits, match: 'testo' });
+  /**
+   * Hybrid retrieval (ILIKE + pgvector) over conversation segments and document
+   * chunks. The authorization filter is part of every query, applied BEFORE ranking.
+   */
+  async #retrieve(ownerId, question, { project = null, sessionId = null, docProject = project, includeConversations = true, includeDocuments = true, limit = 10 }) {
+    const sources = [];
+    if (includeConversations) {
+      sources.push({
+        kind: 'conversazione',
+        select: `g.id, g.text, g.speaker, g.created_at, g.session_id, s.title AS session_title, NULL::uuid AS document_id, NULL AS document_title`,
+        from: 'segments g JOIN sessions s ON s.id = g.session_id',
+        where: 's.owner_id = $1 AND ($2::text IS NULL OR s.project = $2) AND ($3::uuid IS NULL OR s.id = $3)',
+        params: [ownerId, project, sessionId],
+        textCol: 'g.text', vecCol: 'g.embedding', dateCol: 'g.created_at',
+      });
+    }
+    if (includeDocuments) {
+      sources.push({
+        kind: 'documento',
+        select: `c.id, c.text, NULL AS speaker, d.created_at, NULL::uuid AS session_id, NULL AS session_title, d.id AS document_id, d.title AS document_title`,
+        from: 'document_chunks c JOIN documents d ON d.id = c.document_id',
+        where: 'd.owner_id = $1 AND ($2::text IS NULL OR d.project = $2) AND $3::text IS NULL',
+        params: [ownerId, docProject, null],
+        textCol: 'c.text', vecCol: 'c.embedding', dateCol: 'd.created_at',
+      });
     }
 
-    try {
-      if (await this.#embedReady()) {
-        const [qv] = await this.llm.embed([question], { kind: 'query' });
+    const results = new Map();
+    const words = normalize(question).split(' ').filter((w) => w.length > 3 && !STOPWORDS.has(w));
+    const patterns = words.map((w) => `%${w.slice(0, Math.max(4, w.length - 2))}%`);
+    let qv = null;
+    try { if (await this.#embedReady()) [qv] = await this.llm.embed([question], { kind: 'query' }); } catch { /* text search still works */ }
+
+    for (const src of sources) {
+      if (patterns.length) {
         const { rows } = await this.db.query(
-          `SELECT g.id, g.text, g.speaker, g.created_at, g.session_id, s.title AS session_title,
-             1 - (g.embedding <=> $4::vector) AS similarity
-           FROM segments g JOIN sessions s ON s.id = g.session_id
-           WHERE ${scope} AND g.embedding IS NOT NULL ORDER BY g.embedding <=> $4::vector LIMIT 12`,
-          [...params, toVector(qv)]);
+          `SELECT ${src.select}, (SELECT COUNT(*) FROM unnest($4::text[]) p WHERE ${src.textCol} ILIKE p)::int AS hits
+           FROM ${src.from} WHERE ${src.where} AND ${src.textCol} ILIKE ANY($4::text[])
+           ORDER BY hits DESC, ${src.dateCol} DESC LIMIT 12`, [...src.params, patterns]);
+        for (const r of rows) results.set(r.id, { ...r, kind: src.kind, score: 0.15 + 0.15 * r.hits, match: 'testo' });
+      }
+      if (qv) {
+        const { rows } = await this.db.query(
+          `SELECT ${src.select}, 1 - (${src.vecCol} <=> $4::vector) AS similarity
+           FROM ${src.from} WHERE ${src.where} AND ${src.vecCol} IS NOT NULL
+           ORDER BY ${src.vecCol} <=> $4::vector LIMIT 12`, [...src.params, toVector(qv)]);
         for (const r of rows) {
           if (r.similarity < config.searchMinSimilarity) continue;
           const prev = results.get(r.id);
-          results.set(r.id, { ...r, score: (prev?.score ?? 0) + Number(r.similarity), match: prev ? 'testo+semantica' : 'semantica' });
+          results.set(r.id, { ...r, kind: src.kind, score: (prev?.score ?? 0) + Number(r.similarity), match: prev ? 'testo+semantica' : 'semantica' });
         }
       }
-    } catch { /* semantic search is an enhancement; text search still works */ }
+    }
 
-    return [...results.values()].sort((a, b) => b.score - a.score).slice(0, 8)
-      .map(({ id, text, speaker, created_at, session_id, session_title, score, match, similarity }) =>
-        ({ id, text, speaker, created_at, session_id, session_title, score: Number(score.toFixed(3)), match, similarity: similarity != null ? Number(Number(similarity).toFixed(3)) : null }));
+    return [...results.values()].sort((a, b) => b.score - a.score).slice(0, limit)
+      .map(({ hits, ...r }) => ({ ...r, score: Number(r.score.toFixed(3)), similarity: r.similarity != null ? Number(Number(r.similarity).toFixed(3)) : null }));
+  }
+
+  /** General search without LLM: ranked evidence across conversations and documents. */
+  async search(ownerId, query, opts = {}) {
+    if (!query?.trim()) throw new HttpError(400, 'testo di ricerca mancante');
+    return this.#retrieve(ownerId, query, { ...opts, docProject: opts.project ?? null, limit: 20 });
   }
 
   // ----------------------------------------------------------------- report
@@ -561,7 +609,8 @@ export class Orchestrator {
       `SELECT i.field_key, i.value, i.status, i.source_segment_ids, s.title, s.id AS session_id, s.created_at
        FROM items i JOIN sessions s ON s.id = i.session_id
        WHERE s.owner_id = $1 AND s.project = $2 AND s.id <> $3 AND i.kind = 'field' AND i.status <> 'superato'
-       ORDER BY s.created_at DESC`, [session.owner_id, session.project, sessionId]);
+         AND COALESCE(s.started_at, s.created_at) < $4
+       ORDER BY COALESCE(s.started_at, s.created_at) DESC`, [session.owner_id, session.project, sessionId, session.started_at ?? new Date()]);
     const crossSession = [];
     for (const [key, cur] of Object.entries(fieldStates)) {
       const p = prior.find((x) => x.field_key === key);
@@ -570,8 +619,29 @@ export class Orchestrator {
       }
     }
 
+    // Put each extracted value next to the closest passage in the project's
+    // documents, for HUMAN comparison. No automatic verdict is drawn (F10).
+    const documentRefs = [];
+    try {
+      const filled = template.fields.filter((f) => fieldStates[f.key]);
+      if (filled.length && (await this.#embedReady())) {
+        const vectors = await this.llm.embed(filled.map((f) => `${f.label}: ${fieldStates[f.key].value}`), { kind: 'query' });
+        for (const [i, f] of filled.entries()) {
+          const { rows } = await this.db.query(
+            `SELECT c.id, c.text, d.title, 1 - (c.embedding <=> $3::vector) AS similarity
+             FROM document_chunks c JOIN documents d ON d.id = c.document_id
+             WHERE d.owner_id = $1 AND d.project = $2 AND c.embedding IS NOT NULL
+             ORDER BY c.embedding <=> $3::vector LIMIT 1`, [session.owner_id, session.project, toVector(vectors[i])]);
+          if (rows[0] && rows[0].similarity >= 0.45) {
+            documentRefs.push({ field_key: f.key, label: f.label, value: fieldStates[f.key].value, chunk_id: rows[0].id, document_title: rows[0].title, text: rows[0].text, similarity: Number(Number(rows[0].similarity).toFixed(3)) });
+          }
+        }
+      }
+    } catch { /* optional enrichment */ }
+
     const report = {
       generated_at: new Date().toISOString(),
+      document_refs: documentRefs,
       template: { id: template.id, version: template.version, name: template.name },
       stats: { segments: segments.length, items: active.length, gaps: session.audio_gaps.length },
       audio_gaps: session.audio_gaps,
@@ -648,6 +718,34 @@ export class Orchestrator {
     return run();
   }
 
+  // ---------------------------------------------------------------- import
+
+  /**
+   * Imports a past conversation from text ("Nome: frase" per line). It runs
+   * through the same pipeline as live audio (segments → Gemma → rules → report),
+   * asynchronously: the session is returned at once in status 'live'.
+   */
+  async importTranscript(ownerId, { title, project = 'default', templateId = 'riunione', text, date = null, timezone = null, consent = false }, { wait = false } = {}) {
+    const lines = parseTranscript(text);
+    if (!lines.length) throw new HttpError(400, 'trascrizione vuota');
+    if (lines.length > 2000) throw new HttpError(413, 'trascrizione troppo lunga (massimo 2000 battute)');
+    const startedAt = date ? new Date(date) : new Date();
+    if (Number.isNaN(startedAt.getTime())) throw new HttpError(400, 'data non valida');
+    const session = await this.createSession(ownerId, { title: title || 'Conversazione importata', project, templateId, timezone, consent, context: 'importata da trascrizione testuale' });
+    await this.db.query(`UPDATE sessions SET status = 'live', started_at = $2, audio_sources = $3 WHERE id = $1`,
+      [session.id, startedAt.toISOString(), JSON.stringify([{ channel: 'import', label: 'Trascrizione importata' }])]);
+    const first = lines[0].speaker;
+    const job = (async () => {
+      for (const [i, l] of lines.entries()) {
+        await this.onFinal(session.id, { channel: l.speaker === first ? 'mic' : 'tab', speaker: l.speaker, text: l.text, externalId: `imp-${i + 1}` });
+      }
+      return this.completeSession(ownerId, session.id);
+    })();
+    if (wait) return { ...session, lines: lines.length, report: await job };
+    job.catch((e) => console.error('[import]', e));
+    return { ...session, lines: lines.length };
+  }
+
   // --------------------------------------------------------------- recovery
 
   /** After a restart: resume pending extraction and unfinished reports (TC10). */
@@ -667,6 +765,7 @@ export class Orchestrator {
     }
     // Backfill embeddings that failed while Ollama was down.
     this.backfillEmbeddings().catch(() => {});
+    this.documents?.embedPending().catch(() => {});
     return rows.length;
   }
 
@@ -719,11 +818,16 @@ export class Orchestrator {
     this.runtime.delete(id);
   }
 
+  // Healthy state is cached longer than a failure, and a slow health check
+  // while Ollama is busy keeps the last known good state instead of degrading.
   async #llmReady() {
-    if (this.llmAvailable !== null && Date.now() - this.llmCheckedAt < 15000) return this.llmAvailable.llm;
-    this.llmAvailable = await this.llm.status();
+    const age = Date.now() - (this.llmCheckedAt ?? 0);
+    if (this.llmAvailable && age < (this.llmAvailable.llm ? 60000 : 10000)) return this.llmAvailable.llm;
+    const st = await this.llm.status();
     this.llmCheckedAt = Date.now();
-    return this.llmAvailable.llm;
+    if (st.busy) return true; // try the real call; its own failure triggers the fallback
+    this.llmAvailable = st;
+    return st.llm;
   }
 
   async #embedReady() {

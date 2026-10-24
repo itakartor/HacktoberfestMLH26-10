@@ -44,15 +44,17 @@ export class OllamaClient {
     return data.embeddings;
   }
 
+  // `busy: true` = no answer in time (Ollama loading/generating), which is not
+  // the same as being down: callers keep their last known state.
   async status() {
     try {
-      const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(2000) });
+      const res = await fetch(`${config.ollamaUrl}/api/tags`, { signal: AbortSignal.timeout(8000) });
       const { models = [] } = await res.json();
       const names = models.map((m) => m.name);
       const has = (n) => names.some((x) => x === n || x === `${n}:latest`);
       return { reachable: true, llm: has(this.model), embed: has(this.embedModel), models: names };
-    } catch {
-      return { reachable: false, llm: false, embed: false, models: [] };
+    } catch (err) {
+      return { reachable: false, busy: err.name === 'TimeoutError', llm: false, embed: false, models: [] };
     }
   }
 }

@@ -22,6 +22,9 @@ export function reportToMarkdown({ session, segments, items }) {
     if (r.cross_session?.length) {
       out.push('## Confronto con conversazioni precedenti', '', ...r.cross_session.map((c) => `- **${c.field_key}**: prima «${c.previous.value}» (${c.previous.session_title}) → ora «${c.current.value}» [${STATUS_LABEL[c.current.status]}]`), '');
     }
+    if (r.document_refs?.length) {
+      out.push('## Confronto con i documenti di riferimento', '', ...r.document_refs.map((d) => `- **${d.label}**: «${d.value}» (detto in chiamata)\n  > ${d.document_title}: ${d.text.replace(/\s+/g, ' ').slice(0, 300)}`), '', '_Da verificare manualmente._', '');
+    }
     if (r.open_points?.length) out.push('## Punti aperti (Gemma)', '', ...r.open_points.map((p) => `- ${p}`), '');
     if (r.audio_gaps?.length) out.push('## Interruzioni audio', '', ...r.audio_gaps.map((g) => `- ${g.channel}: ${g.from ?? '?'} → ${g.to} (${g.gap_ms ?? '?'} ms) ${g.reason ?? ''}`), '');
   } else {

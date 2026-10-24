@@ -1,6 +1,5 @@
 import http from 'node:http';
 import path from 'node:path';
-import { readdirSync, readFileSync } from 'node:fs';
 import express from 'express';
 import { WebSocketServer } from 'ws';
 import { config, ROOT } from './config.js';
@@ -11,21 +10,31 @@ import { TemplateStore } from './templates.js';
 import { Orchestrator, HttpError } from './orchestrator.js';
 import { ElevenLabsChannel } from './stt/elevenlabs.js';
 import { reportToMarkdown } from './report-md.js';
+import { DocumentStore, extractText } from './documents.js';
+import { loadScenarios, seedDemo } from './seed.js';
+
+export { loadScenarios };
+
+// Loopback, private networks and dot-less hostnames (docker-compose service
+// names like "ollama") stay inside the controlled environment.
+function isLocalHost(url) {
+  const host = new URL(url).hostname;
+  return host === 'localhost' || !host.includes('.') || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || host === 'host.docker.internal';
+}
 
 const CHANNEL_LABELS = { mic: 'Io', tab: 'Interlocutore' };
 const CHANNEL_BY_BYTE = ['mic', 'tab'];
-
-export function loadScenarios() {
-  const dir = path.join(ROOT, 'samples');
-  return readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(path.join(dir, f), 'utf8')));
-}
 
 export async function createApp({ db, llm = new OllamaClient(), templates = new TemplateStore() } = {}) {
   db ??= await createDb();
   const bus = new EventBus(db);
   const orch = new Orchestrator({ db, bus, llm, templates });
+  const documents = new DocumentStore({ db, llm });
+  orch.documents = documents;
   const app = express();
-  app.use(express.json({ limit: '1mb' }));
+  const smallJson = express.json({ limit: '2mb' });
+  const uploadJson = express.json({ limit: '25mb' }); // base64 file uploads
+  app.use((req, res, next) => (req.path === '/api/documents' ? uploadJson : smallJson)(req, res, next));
   app.use(express.static(path.join(ROOT, 'public')));
 
   // Demo identity. Real deployments must replace this with authentication;
@@ -52,7 +61,7 @@ export async function createApp({ db, llm = new OllamaClient(), templates = new 
     llm: { ...(await llm.status()), model: llm.model, embed_model: llm.embedModel },
     external_data_flows: [
       config.elevenLabsKey ? 'Audio → ElevenLabs (STT cloud, api.elevenlabs.io)' : null,
-      config.ollamaUrl.includes('127.0.0.1') || config.ollamaUrl.includes('localhost') ? null : `Testo → Ollama remoto ${config.ollamaUrl}`,
+      isLocalHost(config.ollamaUrl) ? null : `Testo → Ollama remoto ${config.ollamaUrl}`,
     ].filter(Boolean),
   })));
 
@@ -68,6 +77,10 @@ export async function createApp({ db, llm = new OllamaClient(), templates = new 
   app.get('/api/sessions/:id', h(async (req) => orch.getState(user(req), req.params.id)));
   app.delete('/api/sessions/:id', h(async (req) => orch.deleteSession(user(req), req.params.id)));
   app.post('/api/sessions/:id/complete', h(async (req) => orch.completeSession(user(req), req.params.id)));
+  app.post('/api/sessions/:id/report', h(async (req) => {
+    await orch.getSession(user(req), req.params.id);
+    return orch.buildReport(req.params.id); // regenerate (e.g. after corrections or when Gemma was unavailable)
+  }));
   app.post('/api/sessions/:id/template', h(async (req) => orch.changeTemplate(user(req), req.params.id, req.body.template_id)));
   app.get('/api/sessions/:id/events', h(async (req) => {
     await orch.getSession(user(req), req.params.id);
@@ -93,10 +106,55 @@ export async function createApp({ db, llm = new OllamaClient(), templates = new 
   app.get('/api/items/:id/history', h(async (req) => orch.itemHistory(user(req), req.params.id)));
   app.post('/api/suggestions/:id/dismiss', h(async (req) => orch.dismissSuggestion(user(req), req.params.id)));
 
-  app.post('/api/ask', h(async (req) => orch.ask(user(req), req.body.question, { project: req.body.project || null, sessionId: req.body.session_id || null })));
+  app.post('/api/ask', h(async (req) => orch.ask(user(req), req.body.question, {
+    project: req.body.project || null, sessionId: req.body.session_id || null,
+    includeConversations: req.body.include_conversations !== false, includeDocuments: req.body.include_documents !== false,
+  })));
+  app.post('/api/search', h(async (req) => orch.search(user(req), req.body.query, {
+    project: req.body.project || null,
+    includeConversations: req.body.include_conversations !== false, includeDocuments: req.body.include_documents !== false,
+  })));
+
+  app.get('/api/projects', h(async (req) => {
+    const { rows } = await db.query(
+      `SELECT project, SUM(s)::int AS sessions, SUM(d)::int AS documents FROM (
+         SELECT project, 1 AS s, 0 AS d FROM sessions WHERE owner_id = $1
+         UNION ALL SELECT project, 0, 1 FROM documents WHERE owner_id = $1) x
+       GROUP BY project ORDER BY project`, [user(req)]);
+    return rows;
+  }));
+
+  // Reference documents: { title, project, text } or { title, project, filename, content_base64 }.
+  app.get('/api/documents', h(async (req) => documents.list(user(req), req.query.project || null)));
+  app.get('/api/documents/:id', h(async (req) => documents.get(user(req), req.params.id)));
+  app.delete('/api/documents/:id', h(async (req) => documents.delete(user(req), req.params.id)));
+  app.post('/api/documents', h(async (req) => {
+    const owner = user(req);
+    const { title, project, filename, content_base64: b64, mime } = req.body;
+    const text = b64 ? await extractText(Buffer.from(b64, 'base64'), filename) : req.body.text;
+    return documents.add(owner, { title, project, text, filename: filename || null, mime: mime || null });
+  }));
+
+  // Past conversations from text ("Nome: frase" per line) through the full pipeline.
+  app.post('/api/sessions/import', h(async (req) => orch.importTranscript(user(req), req.body)));
+
+  // Demo data (samples/demo.json), run in background; poll GET for progress.
+  const seedJobs = new Map();
+  app.post('/api/demo/seed', h(async (req) => {
+    const owner = user(req);
+    if (seedJobs.get(owner)?.running) return seedJobs.get(owner);
+    const job = { running: true, log: [], result: null, error: null };
+    seedJobs.set(owner, job);
+    seedDemo({ orch, documents, ownerId: owner, log: (m) => job.log.push(m) })
+      .then((r) => { job.result = r; })
+      .catch((e) => { job.error = e.message; console.error('[seed]', e); })
+      .finally(() => { job.running = false; });
+    return job;
+  }));
+  app.get('/api/demo/seed', h(async (req) => seedJobs.get(user(req)) ?? { running: false, log: [], result: null }));
   app.get('/api/metrics', h(async (req) => orch.metrics(user(req))));
 
-  return { app, db, bus, orch };
+  return { app, db, bus, orch, documents };
 }
 
 // One WebSocket per open session page: events out, audio + control in.

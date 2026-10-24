@@ -1,0 +1,82 @@
+# Stack completo replicabile ovunque:
+#   docker compose up -d --build            (CPU, funziona su qualsiasi macchina)
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build   (GPU NVIDIA)
+# Poi apri http://localhost:3000. La chiave ElevenLabs va in .env (ELEVENLABS_API_KEY).
+
+name: conversation-intelligence
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: convintel
+      POSTGRES_USER: convintel
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-convintel}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U convintel -d convintel"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 30m
+    volumes:
+      # OLLAMA_DATA=C:/Users/<utente>/.ollama riusa i modelli già scaricati sull'host
+      - ${OLLAMA_DATA:-ollama}:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  # One-shot: scarica i modelli Gemma nel volume (solo la prima volta è lento, ~7 GB).
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e4b-it-qat}
+      EMBED_MODEL: ${EMBED_MODEL:-embeddinggemma}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        for m in "$$EMBED_MODEL" "$$LLM_MODEL"; do
+          for i in 1 2 3 4 5; do ollama pull "$$m" && break; echo "retry $$m ($$i)"; sleep 5; done
+        done
+    restart: "no"
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      ollama-pull:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://convintel:${POSTGRES_PASSWORD:-convintel}@db:5432/convintel
+      OLLAMA_URL: http://ollama:11434
+      LLM_MODEL: ${LLM_MODEL:-gemma4:e4b-it-qat}
+      EMBED_MODEL: ${EMBED_MODEL:-embeddinggemma}
+      LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - templates:/app/templates
+
+volumes:
+  pgdata:
+  ollama:
+  templates:
