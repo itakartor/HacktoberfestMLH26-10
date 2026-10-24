@@ -287,11 +287,14 @@ export class Orchestrator {
     const alias = (s) => ({ ...s, id: `S${s.seq}` });
     const realId = new Map([...pending, ...ctxRows].map((s) => [`S${s.seq}`, s.id]));
     const fieldStates = await this.fieldStates(sessionId);
+    const { rows: asked } = await this.db.query(
+      `SELECT text FROM suggestions WHERE session_id = $1 AND kind = 'question' ORDER BY created_at DESC LIMIT 6`, [sessionId]);
     const ctx = {
       template, session,
       newSegments: pending.map(alias),
       contextSegments: ctxRows.reverse().map(alias),
       knownFields: Object.fromEntries(Object.entries(fieldStates).map(([k, v]) => [k, `${v.value} (${v.status})`])),
+      recentQuestions: asked.map((r) => r.text),
     };
 
     const t0 = performance.now();
@@ -355,6 +358,7 @@ export class Orchestrator {
       modelQuestions: result.questions ?? [],
       conflicts,
       history,
+      guideFallback: result.extractor === 'regole',
     });
     this.#metric(sessionId, 'rules_ms', performance.now() - t1);
     for (const s of suggestions) {
@@ -374,10 +378,11 @@ export class Orchestrator {
     if (more.length) rt.again = true;
   }
 
+  // Generic policy (not template config): commitments, decisions and amounts
+  // need a human confirmation before they can be relied on.
   #needsConfirmation(template, it) {
-    const list = template.escalation.require_human_confirmation_for;
-    const critical = template.fields.find((f) => f.key === it.field_key)?.critical;
-    return it.status !== 'confermato' && (list.includes(it.kind) || list.includes(it.field_key) || critical);
+    const money = template.fields.find((f) => f.key === it.field_key)?.type === 'money';
+    return it.status !== 'confermato' && it.status !== 'superato' && (it.kind === 'commitment' || it.kind === 'decision' || money);
   }
 
   async #saveItem(sessionId, session, template, it, extractor) {
@@ -645,7 +650,7 @@ export class Orchestrator {
       template: { id: template.id, version: template.version, name: template.name },
       stats: { segments: segments.length, items: active.length, gaps: session.audio_gaps.length },
       audio_gaps: session.audio_gaps,
-      fields: template.fields.map((f) => ({ key: f.key, label: f.label, required: f.required, ...(fieldStates[f.key] ?? { value: null, status: 'non_specificato', source_segment_ids: [] }) })),
+      fields: template.fields.map((f) => ({ key: f.key, label: f.label, ...(fieldStates[f.key] ?? { value: null, status: 'non_specificato', source_segment_ids: [] }) })),
       commitments: active.filter((i) => i.kind === 'commitment'),
       decisions: active.filter((i) => i.kind === 'decision'),
       open_questions: active.filter((i) => i.kind === 'open_question'),
@@ -655,8 +660,8 @@ export class Orchestrator {
       superseded: items.filter((i) => i.status === 'superato'),
       to_verify: active.filter((i) => i.status !== 'confermato' && this.#needsConfirmation(template, i)),
       cross_session: crossSession,
-      completeness: template.fields.filter((f) => f.required).length
-        ? template.fields.filter((f) => f.required && fieldStates[f.key]).length / template.fields.filter((f) => f.required).length : 1,
+      // share of the guideline points that emerged during the call
+      completeness: template.fields.length ? template.fields.filter((f) => fieldStates[f.key]).length / template.fields.length : 1,
       summary: null, topics: [], open_points: [], needs_human_confirmation: [], summary_source: 'nessuna',
     };
 
@@ -806,7 +811,7 @@ export class Orchestrator {
 
   #engine(template) {
     return new RuleEngine(template, {
-      cooldownMs: config.suggestionCooldownMs,
+      maxPerMinute: config.maxSuggestionsPerMinute,
       fieldCooldownMs: config.fieldQuestionCooldownMs,
       minSegments: config.minSegmentsBeforeMissingQuestions,
     });

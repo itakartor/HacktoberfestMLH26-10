@@ -25,7 +25,7 @@ export const config = {
   extractionDebounceMs: Number(env.EXTRACTION_DEBOUNCE_MS || 2500),
   extractionMaxBatch: Number(env.EXTRACTION_MAX_BATCH || 3),
   contextWindowSegments: Number(env.CONTEXT_WINDOW_SEGMENTS || 10),
-  suggestionCooldownMs: Number(env.SUGGESTION_COOLDOWN_MS || 20000),
+  maxSuggestionsPerMinute: Number(env.MAX_SUGGESTIONS_PER_MINUTE || 3),
   fieldQuestionCooldownMs: Number(env.FIELD_QUESTION_COOLDOWN_MS || 90000),
   minSegmentsBeforeMissingQuestions: Number(env.MIN_SEGMENTS_BEFORE_QUESTIONS || 3),
   searchMinSimilarity: Number(env.SEARCH_MIN_SIMILARITY || 0.35),

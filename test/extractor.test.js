@@ -71,6 +71,34 @@ test('FC02 self-correction is flagged for verification', () => {
   assert.match(r.fields[0].status_reason, /autocorrezione/);
 });
 
+test('Carmine case: a statement linked to a guideline point fills it', () => {
+  const r = processExtraction(extraction({
+    items: [item({ kind: 'fact', content: 'la data di consegna è il 20 dicembre', field_key: 'data_consegna', value: '20 dicembre', quote: 'la data di consegna è il 20 dicembre' })],
+  }), { template, session, newSegments: [seg(9, 'Eeeh, quindi la data di consegna è il 20 dicembre.')] });
+  assert.equal(r.fields.length, 1);
+  assert.equal(r.fields[0].key, 'data_consegna');
+  assert.equal(r.fields[0].due_date, '2026-12-20');
+});
+
+test('Carmine case: safety net fills the point even if the model forgets to link it', () => {
+  const r = processExtraction(extraction({
+    items: [item({ kind: 'fact', content: 'la data di consegna è il 20 dicembre', quote: 'la data di consegna è il 20 dicembre' })],
+  }), { template, session, newSegments: [seg(9, 'Eeeh, quindi la data di consegna è il 20 dicembre.'), seg(10, 'Il budget può rimanere 40.000 euro.')] });
+  const byKey = Object.fromEntries(r.fields.map((f) => [f.key, f]));
+  assert.equal(byKey.data_consegna.value, '20 dicembre');
+  assert.match(byKey.data_consegna.status_reason, /collegato alla traccia dal sistema/);
+  assert.match(byKey.budget.value, /40\.000 euro/);
+  assert.equal(byKey.data_avvio, undefined, 'a delivery date is not a start date');
+});
+
+test('safety net never overrides a point that is already known', () => {
+  const r = processExtraction(extraction(), {
+    template, session, knownFields: { data_consegna: '10 dicembre (da_verificare)' },
+    newSegments: [seg(1, 'Forse la consegna slitta al 20 dicembre.')],
+  });
+  assert.equal(r.fields.length, 0);
+});
+
 test('rules fallback extracts conservatively with sources', () => {
   const r = extractWithRules({ template, session, newSegments: [seg(1, 'Ti invio il preventivo entro venerdì. Il prezzo è di 15.000 euro.')] });
   assert.ok(r.items.some((i) => i.kind === 'commitment' && i.due_date === '2026-10-30'));

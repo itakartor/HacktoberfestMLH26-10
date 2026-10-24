@@ -1,23 +1,14 @@
 {
   "id": "decisionale",
-  "name": "Supporto decisionale",
-  "version": 1,
-  "description": "Confronta alternative, vincoli e rischi; evidenzia dipendenze e ipotesi non dimostrate.",
-  "context": "Chiamata in cui deve essere presa una decisione.",
-  "goal": "Rendere visibili alternative, rischi e assunzioni prima di decidere.",
-  "mode": "decisionale",
-  "look_for": ["alternative considerate", "vincoli", "rischi e ritardi", "assunzioni non verificate", "criteri di scelta"],
-  "fields": [
-    { "key": "decisione_da_prendere", "label": "Decisione da prendere", "description": "la scelta in discussione", "required": true, "question": "Qual è esattamente la decisione da prendere?" },
-    { "key": "alternative", "label": "Alternative", "description": "opzioni considerate", "required": true, "question": "Quali alternative abbiamo valutato?" },
-    { "key": "vincoli", "label": "Vincoli", "description": "vincoli di budget, tempo o risorse", "required": false, "question": "Ci sono vincoli di budget o di tempo?" },
-    { "key": "scadenza_decisione", "label": "Scadenza decisione", "description": "entro quando decidere", "required": false, "question": "Entro quando va presa la decisione?" }
+  "nome": "Supporto decisionale",
+  "descrizione": "Chiamata in cui va presa una decisione.",
+  "obiettivo": "Rendere visibili alternative, vincoli, rischi e assunzioni prima di decidere.",
+  "versione": 2,
+  "punti": [
+    { "punto": "Decisione da prendere", "domanda": "Qual è esattamente la decisione da prendere?" },
+    { "punto": "Alternative", "domanda": "Quali alternative abbiamo valutato?" },
+    { "punto": "Vincoli", "domanda": "Ci sono vincoli di budget o di tempo?" },
+    { "punto": "Scadenza decisione", "domanda": "Entro quando va presa la decisione?" }
   ],
-  "rules": [
-    { "id": "rischio_ritardo", "priority": "high", "when": { "text_matches": "ritard|slitta|spostat|\\bse (riceviamo|arriva|arrivano)" }, "then": { "type": "alert", "message": "Rischio di ritardo: la data dipende da condizioni non ancora soddisfatte." } },
-    { "id": "decisione_non_definitiva", "priority": "medium", "when": { "kind": "decision", "certainty_in": ["ipotetico", "ambiguo", "condizionato"] }, "then": { "type": "alert", "message": "Decisione non definitiva: esplicitare le assunzioni prima di procedere." } }
-  ],
-  "feedback": { "live_questions": true, "max_live_suggestions_per_minute": 2 },
-  "escalation": { "require_human_confirmation_for": ["decision"] },
-  "tests": []
+  "domande_generali": ["Quali rischi vediamo per ciascuna alternativa?"]
 }

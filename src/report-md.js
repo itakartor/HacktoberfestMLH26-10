@@ -10,8 +10,8 @@ export function reportToMarkdown({ session, segments, items }) {
   const line = (i) => `- ${i.content}${i.owner ? ` — resp.: ${i.owner}` : ''}${i.due_text ? ` — scadenza: ${i.due_text}${i.due_date ? ` (${i.due_date})` : ''}` : ''} **[${STATUS_LABEL[i.status]}]**${src(i.source_segment_ids)}`;
   const out = [`# ${session.title}`, '', `Template: ${session.template_id} v${session.template_version} · Stato: ${session.status} · Inizio: ${session.started_at ?? '-'} · Fine: ${session.ended_at ?? '-'}`, ''];
   if (r) {
-    out.push('## Sintesi', '', r.summary, '', `_Generata da: ${r.summary_source}. Completezza campi obbligatori: ${Math.round(r.completeness * 100)}%_`, '');
-    out.push('## Campi del template', '', ...r.fields.map((f) => `- **${f.label}**: ${f.value ?? '—'} [${STATUS_LABEL[f.status] ?? f.status}]${src(f.source_segment_ids)}`), '');
+    out.push('## Sintesi', '', r.summary, '', `_Generata da: ${r.summary_source}. Punti della traccia emersi: ${Math.round(r.completeness * 100)}%_`, '');
+    out.push('## Traccia', '', ...r.fields.map((f) => `- **${f.label}**: ${f.value ?? '—'} [${STATUS_LABEL[f.status] ?? f.status}]${src(f.source_segment_ids)}`), '');
     const sec = (title, arr) => { if (arr?.length) out.push(`## ${title}`, '', ...arr.map(line), ''); };
     sec('Impegni', r.commitments);
     sec('Decisioni', r.decisions);

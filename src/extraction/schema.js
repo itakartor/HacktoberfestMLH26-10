@@ -15,6 +15,9 @@ export const ExtractedItemSchema = z.object({
   owner: z.string().max(80).nullable(),
   due: z.string().max(80).nullable(),
   conditions: z.string().max(300).nullable(),
+  // Link to a point of the template guideline, when the statement answers it.
+  field_key: z.string().nullable().default(null),
+  value: z.string().max(200).nullable().default(null),
   source_segment_ids: sourceIds,
   quote: z.string().min(2).max(500),
 });
@@ -35,8 +38,8 @@ export const ExtractedQuestionSchema = z.object({
 
 export const ExtractionOutputSchema = z.object({
   items: z.array(ExtractedItemSchema).max(12),
-  fields: z.array(ExtractedFieldSchema).max(12),
-  questions: z.array(ExtractedQuestionSchema).max(3),
+  fields: z.array(ExtractedFieldSchema).max(12).default([]),
+  questions: z.array(ExtractedQuestionSchema).max(2),
 });
 
 export const AnswerOutputSchema = z.object({

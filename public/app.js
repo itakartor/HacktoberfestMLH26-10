@@ -71,7 +71,6 @@ async function boot() {
   $('#btn-delete').onclick = deleteSession;
   $('#live-template').onchange = changeTemplate;
   $('#ask-form').onsubmit = ask;
-  $('#tpl-save').onclick = saveTemplate;
   document.querySelectorAll('.tabs button[data-tab]').forEach((b) => { b.onclick = () => showTab(b.dataset.tab); });
   document.querySelectorAll('.tabs button[data-atab]').forEach((b) => { b.onclick = () => showArchiveTab(b.dataset.atab); });
   $('#btn-archive').onclick = openArchive;
@@ -109,10 +108,36 @@ async function loadSessions() {
   const list = await api('/api/sessions');
   $('#sessions').innerHTML = list.map((s) => `
     <li data-id="${s.id}" class="${s.id === state.sessionId ? 'active' : ''}">
-      <div>${esc(s.title)}</div>
-      <div class="s-sub">${esc(s.project)} · ${esc(s.template_id)} · ${statusLabel(s.status)} · ${s.segments} segm.</div>
+      <div class="s-main">
+        <div>${esc(s.title)}</div>
+        <div class="s-sub">${esc(s.project)} · ${esc(s.template_id)} · ${statusLabel(s.status)} · ${s.segments} segm.</div>
+      </div>
+      <button class="trash" data-trash="${s.id}" title="Elimina conversazione" aria-label="Elimina «${esc(s.title)}»">🗑</button>
     </li>`).join('') || '<li class="muted">Nessuna conversazione</li>';
   document.querySelectorAll('#sessions li[data-id]').forEach((li) => { li.onclick = () => openSession(li.dataset.id); });
+  document.querySelectorAll('#sessions [data-trash]').forEach((b) => { b.onclick = (e) => trashSession(e, b); });
+}
+
+// Two-step delete without browser dialogs: first click arms, second confirms.
+async function trashSession(e, btn) {
+  e.stopPropagation();
+  if (btn.dataset.armed !== '1') {
+    btn.dataset.armed = '1';
+    btn.textContent = 'Elimina?';
+    btn.classList.add('armed');
+    setTimeout(() => { if (btn.isConnected) { btn.dataset.armed = ''; btn.textContent = '🗑'; btn.classList.remove('armed'); } }, 3500);
+    return;
+  }
+  const id = btn.dataset.trash;
+  try {
+    await api(`/api/sessions/${id}`, { method: 'DELETE' });
+    if (state.sessionId === id) {
+      localStorageSet(`session:${state.user}`, '');
+      closeSession();
+    }
+    toast('Conversazione eliminata con trascrizione, estrazioni e report', 'ok');
+    loadSessions();
+  } catch (err) { toast(err.message, 'high'); }
 }
 
 const statusLabel = (s) => ({ created: 'creata', live: 'live', processing: 'in elaborazione', completed: 'completata' }[s] || s);
@@ -382,7 +407,7 @@ function renderSession() {
   $('#s-title').textContent = session.title;
   $('#s-meta').innerHTML = [
     `<span>Progetto: <b>${esc(session.project)}</b></span>`,
-    `<span>Template: <b>${esc(template.name)}</b> v${session.template_version} · modalità ${esc(template.mode)}</span>`,
+    `<span>Template: <b>${esc(template.name)}</b> v${session.template_version}</span>`,
     `<span>Stato: <b>${statusLabel(session.status)}</b></span>`,
     session.timezone ? `<span>Fuso: ${esc(session.timezone)}</span>` : '',
     session.started_at ? `<span>Inizio: ${new Date(session.started_at).toLocaleString('it-IT')}</span>` : '',
@@ -490,19 +515,18 @@ function bindSources(root) {
 function renderFields() {
   const { template, items } = state.data;
   const active = items.filter((i) => i.kind === 'field' && i.status !== 'superato');
-  let filledReq = 0;
-  const req = template.fields.filter((f) => f.required).length;
+  let covered = 0;
   $('#fields').innerHTML = template.fields.map((f) => {
     const vals = active.filter((i) => i.field_key === f.key);
-    if (vals.length && f.required) filledReq++;
+    if (vals.length) covered++;
     const cell = vals.length
       ? vals.map((v) => `<div>${esc(v.value)} <span class="st st-${v.status}">${STATUS_LABEL[v.status]}</span>
           <a href="#" class="small" data-src="${v.source_segment_ids.join(',')}">${v.source_segment_ids.map(segLabel).join(',')}</a>
           ${v.due_date ? `<span class="small muted">→ ${v.due_date}</span>` : ''}</div>`).join('')
-      : '<span class="st st-non_specificato">non specificato</span>';
-    return `<tr><td>${esc(f.label)}${f.required ? ' <span class="req" title="obbligatorio">*</span>' : ''}</td><td>${cell}</td></tr>`;
+      : '<span class="muted small">non ancora emerso</span>';
+    return `<tr><td title="${esc(f.question || '')}">${esc(f.label)}</td><td>${cell}</td></tr>`;
   }).join('');
-  $('#completeness').textContent = req ? `completezza ${filledReq}/${req}` : '';
+  $('#completeness').textContent = template.fields.length ? `${covered}/${template.fields.length} punti emersi` : '';
   bindSources($('#fields'));
 }
 
@@ -565,8 +589,8 @@ function renderReport() {
   $('#report').innerHTML = [
     sec(`Sintesi <span class="muted small">(${r.summary_source}${r.summary_source === 'gemma' ? ', da verificare' : ''})</span>`, `<p>${esc(r.summary)}</p>
       ${r.topics?.length ? `<p class="small muted">Argomenti: ${r.topics.map(esc).join(' · ')}</p>` : ''}
-      <p class="small">Completezza campi obbligatori: <b>${Math.round(r.completeness * 100)}%</b> · ${r.stats.segments} segmenti · ${r.stats.items} elementi · ${r.stats.gaps} interruzioni</p>`),
-    sec('Scheda', `<table class="fields">${r.fields.map((f) => `<tr><td>${esc(f.label)}${f.required ? ' <span class="req">*</span>' : ''}</td><td>${esc(f.value ?? '—')} <span class="st st-${f.status}">${STATUS_LABEL[f.status]}</span></td></tr>`).join('')}</table>`),
+      <p class="small">Punti della traccia emersi: <b>${Math.round(r.completeness * 100)}%</b> · ${r.stats.segments} segmenti · ${r.stats.items} elementi · ${r.stats.gaps} interruzioni</p>`),
+    sec('Traccia', `<table class="fields">${r.fields.map((f) => `<tr><td>${esc(f.label)}</td><td>${esc(f.value ?? '—')} <span class="st st-${f.status}">${STATUS_LABEL[f.status]}</span></td></tr>`).join('')}</table>`),
     r.document_refs?.length ? sec('Confronto con i documenti di riferimento', `${r.document_refs.map((d) => `
       <div class="item"><div class="content">${esc(d.label)}: «${esc(d.value)}» <span class="small muted">(detto in chiamata)</span></div>
         <div class="chunk"><span class="sid">📄 ${esc(d.document_title)} · similarità ${d.similarity}</span>\n${esc(d.text)}</div></div>`).join('')}
@@ -805,25 +829,58 @@ async function renderMetrics() {
     <p class="small muted">«grounding» = estrazioni la cui citazione non compare nei segmenti indicati: non entrano mai nel database.</p>`;
 }
 
-async function renderTemplates() {
+async function renderTemplates(selectId) {
   state.templates = await api('/api/templates');
-  $('#tpl-list').innerHTML = state.templates.map((t) => `<li data-id="${t.id}"><b>${esc(t.name)}</b><div class="small muted">${t.id} · v${t.version} · ${t.mode}</div></li>`).join('');
+  $('#tpl-list').innerHTML = state.templates.map((t) => `<li data-id="${t.id}"><b>${esc(t.name)}</b><div class="small muted">${t.fields.length} punti · v${t.version}</div></li>`).join('');
   $('#tpl-list').querySelectorAll('li').forEach((li) => {
-    li.onclick = () => { $('#tpl-json').value = JSON.stringify(state.templates.find((t) => t.id === li.dataset.id), null, 2); };
+    li.onclick = () => fillTemplateForm(state.templates.find((t) => t.id === li.dataset.id));
   });
-  if (!$('#tpl-json').value) $('#tpl-json').value = JSON.stringify(state.templates[0], null, 2);
+  $('#tpl-new').onclick = () => fillTemplateForm(null);
+  $('#tpl-form').onsubmit = saveTemplate;
+  const current = state.templates.find((t) => t.id === (selectId || $('#tpl-form').id.value)) || state.templates[0];
+  fillTemplateForm(current);
 }
 
-async function saveTemplate() {
+function fillTemplateForm(t) {
+  const f = $('#tpl-form');
+  f.reset();
+  $('#tpl-msg').textContent = '';
+  $('#tpl-list').querySelectorAll('li').forEach((li) => li.classList.toggle('active', li.dataset.id === t?.id));
+  f.id.readOnly = Boolean(t);
+  if (!t) return f.nome.focus();
+  f.nome.value = t.name;
+  f.id.value = t.id;
+  f.descrizione.value = t.description || '';
+  f.obiettivo.value = t.goal || '';
+  f.punti.value = t.fields.map((p) => (p.question ? `${p.label} | ${p.question}` : p.label)).join('\n');
+  f.domande_generali.value = (t.guide_questions || []).join('\n');
+}
+
+async function saveTemplate(e) {
+  e.preventDefault();
+  const f = e.target;
+  const lines = (s) => s.split('\n').map((l) => l.trim()).filter(Boolean);
+  const body = {
+    nome: f.nome.value.trim(),
+    ...(f.id.value.trim() ? { id: f.id.value.trim() } : {}),
+    descrizione: f.descrizione.value.trim(),
+    obiettivo: f.obiettivo.value.trim(),
+    punti: lines(f.punti.value).map((l) => {
+      const [punto, ...rest] = l.split('|');
+      const domanda = rest.join('|').trim();
+      return domanda ? { punto: punto.trim(), domanda } : { punto: punto.trim() };
+    }),
+    domande_generali: lines(f.domande_generali.value),
+  };
   try {
-    const t = await api('/api/templates', { method: 'POST', body: JSON.parse($('#tpl-json').value) });
-    $('#tpl-msg').textContent = `Salvato ${t.id} v${t.version}`;
-    $('#tpl-json').value = JSON.stringify(t, null, 2);
+    const t = await api('/api/templates', { method: 'POST', body });
     state.templates = await api('/api/templates');
     const opts = state.templates.map((x) => `<option value="${x.id}">${esc(x.name)} (v${x.version})</option>`).join('');
     $('#template-select').innerHTML = opts;
     $('#live-template').innerHTML = opts;
-    renderTemplates();
+    document.querySelectorAll('.tpl-options').forEach((s) => { s.innerHTML = opts; });
+    await renderTemplates(t.id);
+    $('#tpl-msg').textContent = `Salvato «${t.name}» v${t.version}`;
   } catch (err) { $('#tpl-msg').textContent = `Errore: ${err.message}`; }
 }
 

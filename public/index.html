@@ -175,7 +175,7 @@
                 <ul id="suggestions" class="suggestions"></ul>
               </div>
               <div class="panel">
-                <div class="panel-head"><h3>Scheda del template</h3><span id="completeness" class="pill"></span></div>
+                <div class="panel-head"><h3>Traccia della chiamata</h3><span id="completeness" class="pill"></span></div>
                 <table id="fields" class="fields"></table>
               </div>
               <div class="panel">
@@ -224,13 +224,27 @@
         </div>
 
         <div class="tab" id="tab-templates" hidden>
-          <p class="muted">I template sono dati versionati: modificarli non richiede di toccare codice o prompt. Salvare un id esistente crea una nuova versione (la precedente resta in archivio e le sessioni conservano la versione usata).</p>
+          <p class="muted">Un template è una <b>traccia</b>: l'obiettivo della chiamata e i punti da toccare, ciascuno con una domanda guida.
+            Gemma propone una domanda solo quando è pertinente, riformulata sul contesto, e mai su ciò che è già stato detto.
+            Salvando un template esistente se ne crea una nuova versione; le conversazioni passate restano sulla versione con cui sono state fatte.</p>
           <div class="tpl-grid">
-            <ul id="tpl-list" class="tpl-list"></ul>
             <div>
-              <textarea id="tpl-json" rows="24" spellcheck="false"></textarea>
-              <div class="row"><button id="tpl-save" class="primary">Salva template</button><span id="tpl-msg" class="small"></span></div>
+              <ul id="tpl-list" class="tpl-list"></ul>
+              <button id="tpl-new" class="ghost" style="margin-top:8px; width:100%">+ Nuovo template</button>
             </div>
+            <form id="tpl-form" class="panel stack">
+              <div class="row3">
+                <label>Nome <input name="nome" required placeholder="Es. Call con fornitore"></label>
+                <label>ID <input name="id" placeholder="automatico dal nome" pattern="[a-z0-9_-]+"></label>
+              </div>
+              <label>Descrizione <input name="descrizione" placeholder="Quando usarlo"></label>
+              <label>Obiettivo della chiamata <textarea name="obiettivo" rows="2" placeholder="Cosa vogliamo sapere alla fine della chiamata?"></textarea></label>
+              <label><span>Punti da toccare: uno per riga, <code>Punto | domanda guida</code></span>
+                <textarea name="punti" rows="7" required placeholder="Prezzo | Il prezzo è confermato?&#10;Data consegna | Per quando serve la consegna?&#10;Decisore | Chi approva dal vostro lato?"></textarea></label>
+              <label>Domande generali (facoltative, una per riga) <textarea name="domande_generali" rows="2"></textarea></label>
+              <p class="small muted">Il tipo di ogni punto (data, importo, persona) viene riconosciuto dal nome: «Data consegna», «Budget», «Decisore»…</p>
+              <div class="row"><button class="primary">Salva template</button><span id="tpl-msg" class="small"></span></div>
+            </form>
           </div>
         </div>
       </section>

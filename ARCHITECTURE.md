@@ -8,7 +8,7 @@ Implementa la specifica in [docs/prompt-master.md](docs/prompt-master.md) e tien
 - [2. Vista d'insieme](#2-vista-dinsieme)
 - [3. Flusso live](#3-flusso-live-dalla-voce-al-feedback)
 - [4. Pipeline di estrazione e guardrail](#4-pipeline-di-estrazione-e-guardrail)
-- [5. Motore di regole e template](#5-motore-di-regole-e-template)
+- [5. Template come traccia e motore di regole](#5-template-come-traccia-e-motore-di-regole)
 - [6. Livello post-chiamata](#6-livello-post-chiamata)
 - [7. Memoria, documenti e ricerca](#7-memoria-documenti-e-ricerca)
 - [8. Modello dati](#8-modello-dati)
@@ -204,35 +204,52 @@ fatto_verificato, inferenza, ipotesi, raccomandazione. `certainty`: certo, condi
 aggiornamento (*spostata, rimandata, invece, nuova data…*) il valore precedente diventa `superato` e punta al nuovo;
 senza marcatore entrambi diventano `contestato` e scatta un alert ad alta priorità. Le fonti restano tutte (TC06, F09).
 
-## 5. Motore di regole e template
+## 5. Template come traccia e motore di regole
 
-Il motore (`src/rules/engine.js`) decide **cosa mostrare e quando**. Gemma propone domande, ma è il motore che
-decide se mostrarle.
+**Un template è una linea guida, non un questionario.** Contiene solo l'obiettivo della chiamata e i punti da
+toccare, ciascuno con una domanda guida:
 
-- **Sempre mostrati** (alta priorità): istruzioni ostili pronunciate in chiamata e conflitti tra valori.
-- **Regole del template**: `text_matches` (regex su un segmento), `kind` + `certainty_in` (su un elemento estratto),
-  `field` + `status_in` (sullo stato di un campo), con `after_segments` per non scattare troppo presto.
-- **Campi obbligatori mancanti**: dopo un numero minimo di segmenti, **una sola domanda per volta**, prima la più critica.
-- **Anti-rumore** (F13, FC07, caso D): una sola istanza per chiave di deduplica (vince la priorità più alta,
-  regola di conflitto esplicita), cooldown per domanda, budget di suggerimenti al minuto definito nel template.
-  Nella UI le domande la cui risposta è emersa nel frattempo vengono segnate come risolte.
-- In **modalità `sintetica`** non vengono proposte domande live.
+```json
+{
+  "id": "commerciale",
+  "nome": "Trattativa commerciale",
+  "obiettivo": "Raccogliere ciò che serve per un preventivo affidabile…",
+  "punti": [
+    { "punto": "Prezzo", "domanda": "Il prezzo è confermato? Qual è l'importo esatto?" },
+    { "punto": "Data consegna", "domanda": "Per quando serve la consegna?" }
+  ]
+}
+```
 
-**Template come dati.** Un template (`templates/*.json`, validato con Zod) definisce: obiettivo, contesto, modalità
-(sintetica / esplorativa / verifica / decisionale / monitoraggio / critica), cosa cercare, campi (obbligatori,
-critici, con la domanda associata), regole, budget di feedback, escalation verso la conferma umana e casi di test.
-Salvarne uno con un ID esistente crea una **nuova versione** e archivia la precedente in `templates/archive/`.
-Sessioni ed elementi conservano la versione con cui sono stati prodotti; un cambio di template durante la chiamata
-viene tracciato in `template_history` (TC21).
+Si crea dalla UI (scheda *Template*, una riga per punto: `Punto | domanda guida`) oppure come file in `templates/`.
+Dal nome del punto il server ricava la chiave (`data_consegna`), il tipo (*data*, *importo*, *persona*, *testo*) e
+alcune parole chiave (*consegna → consegnare, deadline, online…*). Chi scrive il template non deve configurare altro.
 
-La stessa frase produce feedback diversi a seconda del template (TC12). Per esempio, *«Possiamo consegnare a
-dicembre, se riceviamo i materiali entro il 15 novembre. Il prezzo è ancora da confermare.»*:
+**Come viene usato.**
+- I punti dicono a Gemma **cosa collegare**: quando una frase risponde a un punto, l'elemento estratto porta
+  `field_key` e `value`, e il punto compare nella *Traccia della chiamata* con fonte e stato. Si estrae comunque
+  **tutto** ciò che è rilevante, non solo i punti della traccia.
+- **Rete di sicurezza**: se il modello estrae *«la data di consegna è il 20 dicembre»* senza collegarla al punto, il
+  server compila il punto da una frase che contiene una parola chiave del punto e un valore del tipo giusto (la data o
+  l'importo più vicino). Lo fa solo per punti non ancora noti, e lo segnala come «collegato alla traccia dal sistema».
+- Le domande guida sono una **traccia per Gemma**, che propone al massimo una domanda alla volta, solo se è utile in
+  quel momento, riformulata sul contesto, mai su un punto già emerso e senza ripetere domande già suggerite.
+  Senza Gemma (estrattore di riserva) viene usata la domanda guida del primo punto non ancora emerso.
 
-| Template | Feedback |
-|---|---|
-| commerciale | «Prezzo non confermato» |
-| operativo | «Dipendenza da un input esterno, tracciarne la scadenza» |
-| decisionale | «Rischio di ritardo» |
+**Comportamenti generici**, uguali per ogni template e non configurabili, così i template restano semplici. Il motore
+(`src/rules/engine.js`) decide cosa mostrare e quando:
+- **alert sempre mostrati**: istruzioni ostili pronunciate in chiamata, valori in conflitto, accettazioni o decisioni
+  condizionate (FC03, caso A); con priorità media le autocorrezioni;
+- **domande**: una per volta, mai su un punto già emerso, deduplicate per punto (anche se riformulate) con cooldown
+  di 90 s (F13, FC07, caso D);
+- **budget**: al massimo 3 suggerimenti non urgenti al minuto (`MAX_SUGGESTIONS_PER_MINUTE`);
+- **conferma umana**: impegni, decisioni e importi vanno nel report come «da verificare prima di decidere».
+
+**Versioni.** Salvare un template esistente crea una nuova versione. I template di base stanno nell'immagine e quelli
+creati dalla UI in una cartella separata (`TEMPLATES_DIR`, un volume in Docker), così un aggiornamento dell'app non
+nasconde le versioni nuove e non perde le modifiche. Sessioni ed elementi conservano la versione con cui sono stati
+prodotti, e i template salvati nel vecchio formato vengono convertiti in automatico. Un cambio di template durante la
+chiamata viene tracciato in `template_history` (TC21).
 
 ## 6. Livello post-chiamata
 
@@ -400,7 +417,7 @@ Tipi: `audio_started`, `audio_stopped`, `transcript_partial`, `transcript_final`
 | **Segreti** | La chiave STT vive solo lato server (`.env`, escluso da git e dall'immagine Docker); il browser non la vede mai |
 | **Tracciabilità** | Storico di elementi e versioni dei segmenti, con autore e data; log degli eventi |
 | **Cancellazione** | A cascata su tutti i derivati, embedding compresi |
-| **Supervisione umana** | Gli elementi critici richiedono conferma (`escalation` nel template); il report elenca le cose «da verificare prima di decidere» |
+| **Supervisione umana** | Impegni, decisioni e importi richiedono una conferma umana; il report elenca le cose «da verificare prima di decidere» |
 
 **Non ancora presenti, e da aggiungere prima di usare dati reali:**
 - autenticazione vera (oggi l'utente è un header di demo);
@@ -455,11 +472,12 @@ macchina, non garanzie.
 | **PostgreSQL + pgvector** | DB vettoriale separato | Relazionale, JSONB e vettori in un'unica transazione, con filtri di autorizzazione nella stessa query |
 | **PGlite embedded** in modalità nativa | Docker obbligatorio | Zero installazione per sviluppo e demo, stesso schema |
 | **Regole deterministiche sopra l'LLM** | Lasciar decidere tutto al modello | Priorità, cooldown e sicurezza devono essere prevedibili e testabili |
+| **Template minimali** (obiettivo + punti con domanda guida) | Template con regole, soglie, modalità | Chi scrive un template non deve imparare un linguaggio di regole; i comportamenti critici sono generici e testati una volta sola |
 | **Frontend senza build step** | React o Vite | Avvio immediato, nessuna toolchain; adatto a un prototipo |
 
 ## Test
 
-`npm test` esegue 46 test deterministici: un Gemma finto restituisce output controllati, anche malformati, e il
+`npm test` esegue 51 test deterministici: un Gemma finto restituisce output controllati, anche malformati, e il
 database è PGlite in memoria. `npm run e2e:stt` verifica il percorso audio reale fino a Gemma.
 
 | Caso | Test |
@@ -470,7 +488,8 @@ database è PGlite in memoria. `npm run e2e:stt` verifica il percorso audio real
 | TC06 / FC06 aggiornamenti e conflitti senza sovrascrittura | `pipeline` |
 | TC09 perdita e ripristino della connessione · TC10 persistenza e riavvio | `pipeline` |
 | TC11 risposte con fonti, rifiuto senza evidenze, citazioni inventate scartate | `pipeline`, `documents` |
-| TC12 template diversi sulla stessa frase · F13 / FC07 suggerimenti non ripetitivi | `rules` |
+| Template come traccia: nessuna domanda fissa, niente domande su punti già emersi · F13 / FC07 suggerimenti non ripetitivi | `rules` |
+| Caso «Chiamata con Carmine»: data di consegna collegata alla traccia, anche se il modello non la collega | `extractor` |
 | TC13 / FC09 correzione con propagazione e storico | `pipeline` |
 | TC14 / F19 JSON non valido → quarantena e fallback | `extractor`, `pipeline` |
 | TC15 / F15 istruzioni pronunciate trattate come dati | `rules`, `pipeline` |

@@ -2,15 +2,6 @@
 // (user, inside <trascrizione>). The separation is a mitigation, not a security
 // boundary: permissions are enforced in the backend and Gemma has no tools.
 
-const MODE_GUIDANCE = {
-  sintetica: 'Estrai solo le informazioni essenziali. Nessuna domanda se non indispensabile.',
-  esplorativa: 'Individua lacune rispetto ai campi del template e proponi domande mirate.',
-  verifica: 'Confronta le dichiarazioni con i criteri del template; segnala ciò che non è supportato.',
-  decisionale: 'Evidenzia alternative, vincoli, rischi e conseguenze; esplicita le assunzioni.',
-  monitoraggio: 'Concentrati su impegni, responsabili, scadenze e cambiamenti rispetto a prima.',
-  critica: 'Cerca contraddizioni, controindicazioni e ipotesi non dimostrate.',
-};
-
 export function extractionSystemPrompt() {
   return `Sei il modulo di estrazione di un sistema di supporto decisionale per conversazioni di lavoro in italiano.
 Ricevi segmenti di trascrizione e restituisci SOLO JSON conforme allo schema.
@@ -32,8 +23,8 @@ REGOLE INVIOLABILI
 9. "due" riporta la scadenza ESATTAMENTE come pronunciata (es. "venerdì", "entro il 15 novembre"); non convertirla.
 10. "kind": fact (dato dichiarato), commitment (impegno/azione futura), decision (decisione, accettazione o rifiuto), need (esigenza/obiettivo), risk (rischio/problema/vincolo), open_question (domanda rimasta senza risposta).
     Ogni accettazione o rifiuto è una "decision", anche se condizionata: «In linea di massima sì, se il prezzo rimane quello» → decision, certainty "condizionato", conditions "il prezzo rimane quello". Non è mai un accordo definitivo.
-11. "fields": compila solo i campi del template con chiave esatta e solo se il valore è stato detto.
-12. "questions": al massimo 2 domande utili all'utente per colmare lacune importanti, solo se pertinenti ora.
+11. Estrai TUTTO ciò che è rilevante, anche se non riguarda i punti della traccia. Quando un elemento risponde a un punto della traccia, indica in quell'elemento "field_key" (chiave esatta del punto) e "value" (il valore detto, es. "20 dicembre", "40.000 euro", "Laura Bianchi"). Esempio: «la data di consegna è il 20 dicembre» → kind "fact", field_key "data_consegna", value "20 dicembre". Altrimenti field_key e value null. Lascia "fields" vuoto.
+12. "questions": la traccia è una LINEA GUIDA, non un questionario. Proponi al massimo 1 domanda, solo se in questo momento è davvero utile all'obiettivo della chiamata: riformulala sul contesto (nomi, cifre, ciò che è appena stato detto), non chiedere ciò che è già stato detto, non ripetere domande già suggerite. Se non serve, lista vuota.
 13. Se non c'è nulla di rilevante restituisci liste vuote.`;
 }
 
@@ -41,17 +32,17 @@ function fmtSeg(s, tag) {
   return `[${s.id} | ${s.speaker} | ${tag}] ${s.text}`;
 }
 
-export function extractionUserPrompt({ template, session, contextSegments, newSegments, knownFields }) {
-  const fields = template.fields.map((f) => `- ${f.key}: ${f.label} — ${f.description}${f.required ? ' (obbligatorio)' : ''}`).join('\n');
+export function extractionUserPrompt({ template, session, contextSegments, newSegments, knownFields, recentQuestions = [] }) {
+  const points = template.fields.map((f) => `- ${f.key}: ${f.label}${f.question ? ` — domanda guida: «${f.question}»` : ''}`).join('\n');
+  const general = template.guide_questions?.length ? `\nDomande guida generali: ${template.guide_questions.map((q) => `«${q}»`).join(' ')}` : '';
   const known = Object.entries(knownFields || {}).map(([k, v]) => `- ${k}: ${v}`).join('\n') || '- nessuno';
-  return `TEMPLATE: ${template.name} (v${template.version})
-Obiettivo: ${template.goal}
-Modalità: ${template.mode} — ${MODE_GUIDANCE[template.mode]}
-Cosa cercare: ${template.look_for.join('; ')}
-Campi del template:
-${fields || '- nessuno'}
-Campi già noti:
+  return `TRACCIA: ${template.name}
+Obiettivo della chiamata: ${template.goal || 'non specificato'}
+Punti della traccia:
+${points || '- nessuno'}${general}
+Punti già emersi:
 ${known}
+Domande già suggerite (non ripeterle): ${recentQuestions.length ? recentQuestions.map((q) => `«${q}»`).join(' ') : 'nessuna'}
 Data sessione: ${session.started_at ? new Date(session.started_at).toISOString() : 'sconosciuta'} — fuso orario: ${session.timezone || 'sconosciuto'}
 
 <trascrizione>

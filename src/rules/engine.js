@@ -3,25 +3,24 @@ import { detect, normalize } from '../extraction/linguistics.js';
 const PRIORITY = { high: 3, medium: 2, low: 1 };
 
 /**
- * Deterministic rule engine (README §3 "Motore di regole"). It decides WHEN to
- * surface feedback; Gemma only proposes content. Dedupe + cooldown + per-minute
- * budget keep live suggestions from becoming noise (F13 / FC07).
+ * Decides WHICH feedback to surface and WHEN. Alerts are generic system
+ * behaviour, identical for every template. Questions come from Gemma, guided by
+ * the template; the engine only filters them: one at a time, never on a point
+ * already covered, never repeated within the cooldown (F13 / FC07).
  */
 export class RuleEngine {
   constructor(template, opts = {}) {
     this.template = template;
-    this.cooldownMs = opts.cooldownMs ?? 20000;
     this.fieldCooldownMs = opts.fieldCooldownMs ?? 90000;
     this.minSegments = opts.minSegments ?? 3;
+    this.maxPerMinute = opts.maxPerMinute ?? 3;
     this.now = opts.now ?? (() => Date.now());
   }
 
-  evaluate({ segmentCount = 0, fieldStates = {}, newItems = [], newSegments = [], modelQuestions = [], conflicts = [], history = [] }) {
-    const t = this.template;
+  evaluate({ segmentCount = 0, fieldStates = {}, newItems = [], newSegments = [], modelQuestions = [], conflicts = [], history = [], guideFallback = false }) {
     const candidates = [];
-    const add = (s) => candidates.push({ source_segment_ids: [], ...s, bypassBudget: s.bypassBudget ?? false });
+    const add = (s) => candidates.push({ source_segment_ids: [], bypassBudget: false, ...s });
 
-    // Safety signals are always shown.
     for (const seg of newSegments) {
       if (detect.injection(seg.text)) {
         add({ kind: 'alert', priority: 'high', rule_id: 'sys_injection', bypassBudget: true,
@@ -44,45 +43,25 @@ export class RuleEngine {
         source_segment_ids: c.source_segment_ids, dedupe_key: `conflict:${c.key}:${normalize(c.newValue)}` });
     }
 
-    for (const rule of t.rules) {
-      const w = rule.when;
-      if (segmentCount < (w.after_segments ?? 0)) continue;
-      const base = { kind: rule.then.type, priority: rule.priority, rule_id: rule.id, text: rule.then.message };
-      if (w.text_matches) {
-        const re = new RegExp(w.text_matches, 'i');
-        for (const seg of newSegments.filter((s) => re.test(s.text))) {
-          add({ ...base, reason: `«${seg.text.slice(0, 120)}»`, source_segment_ids: [seg.id], dedupe_key: `rule:${rule.id}:${seg.id}` });
-        }
-      }
-      if (w.kind) {
-        for (const it of newItems.filter((i) => i.kind === w.kind && (!w.certainty_in || w.certainty_in.includes(i.certainty)))) {
-          add({ ...base, reason: it.content, source_segment_ids: it.source_segment_ids, dedupe_key: `rule:${rule.id}:${normalize(it.content).slice(0, 60)}` });
-        }
-      }
-      if (w.field) {
-        const st = fieldStates[w.field];
-        const status = st?.status ?? 'non_specificato';
-        if (!w.status_in || w.status_in.includes(status)) {
-          add({ ...base, reason: st ? `${st.value} (${status})` : 'non specificato', source_segment_ids: st?.source_segment_ids ?? [],
-            dedupe_key: `rule:${rule.id}:${status}:${normalize(st?.value ?? '')}` });
-        }
-      }
+    // An acceptance with conditions is never an agreement (FC03, case A).
+    for (const it of newItems.filter((i) => i.kind === 'decision' && ['condizionato', 'ipotetico'].includes(i.certainty))) {
+      add({ kind: 'alert', priority: 'high', rule_id: 'sys_conditional',
+        text: 'Accettazione o decisione condizionata: registrata come NON definitiva finché le condizioni non sono verificate.',
+        reason: it.content, source_segment_ids: it.source_segment_ids, dedupe_key: `cond:${normalize(it.content).slice(0, 60)}` });
     }
 
-    const liveQuestions = t.feedback.live_questions && t.mode !== 'sintetica';
-    if (liveQuestions && segmentCount >= this.minSegments) {
-      for (const f of t.fields.filter((f) => f.required && !fieldStates[f.key])) {
-        add({ kind: 'question', priority: f.critical ? 'medium' : 'low', rule_id: 'sys_missing_field',
-          text: f.question || `Manca: ${f.label}`, reason: `Campo obbligatorio non ancora emerso: ${f.label}`,
-          dedupe_key: `missing:${f.key}`, cooldownMs: this.fieldCooldownMs, group: 'missing' });
-      }
+    const covered = (key) => Boolean(key && fieldStates[key]);
+    const questionKey = (q) => (q.field_key ? `q:${q.field_key}` : `q:${normalize(q.text).slice(0, 60)}`);
+    for (const q of modelQuestions) {
+      if (covered(q.field_key)) continue; // the answer already emerged
+      add({ kind: 'question', priority: 'low', rule_id: 'gemma_question', text: q.text, reason: q.reason,
+        dedupe_key: questionKey(q), cooldownMs: this.fieldCooldownMs, group: 'question' });
     }
-    if (liveQuestions) {
-      for (const q of modelQuestions) {
-        if (q.field_key && fieldStates[q.field_key]?.status === 'da_verificare') continue; // already answered
-        add({ kind: 'question', priority: 'low', rule_id: 'gemma_question', text: q.text, reason: q.reason,
-          dedupe_key: q.field_key ? `missing:${q.field_key}` : `q:${normalize(q.text).slice(0, 60)}`, cooldownMs: this.fieldCooldownMs, group: 'missing' });
-      }
+    // Without Gemma: offer the template's own guide question for the first uncovered point.
+    if (guideFallback && segmentCount >= this.minSegments) {
+      const f = this.template.fields.find((x) => x.question && !covered(x.key));
+      if (f) add({ kind: 'question', priority: 'low', rule_id: 'guide_question', text: f.question,
+        reason: `Punto della traccia non ancora emerso: ${f.label}`, dedupe_key: `q:${f.key}`, cooldownMs: this.fieldCooldownMs, group: 'question' });
     }
 
     return this.#select(candidates, history);
@@ -95,24 +74,20 @@ export class RuleEngine {
       const ts = new Date(h.created_at).getTime();
       if (!lastByKey.has(h.dedupe_key) || lastByKey.get(h.dedupe_key) < ts) lastByKey.set(h.dedupe_key, ts);
     }
-    const recentBudgeted = history.filter((h) => now - new Date(h.created_at).getTime() < 60000 && h.priority !== 'high').length;
-    let budget = Math.max(0, this.template.feedback.max_live_suggestions_per_minute - recentBudgeted);
+    const recent = history.filter((h) => now - new Date(h.created_at).getTime() < 60000 && h.priority !== 'high').length;
+    let budget = Math.max(0, this.maxPerMinute - recent);
 
-    // One candidate per dedupe key, highest priority wins (explicit conflict policy).
+    // One candidate per dedupe key; the highest priority wins.
     const byKey = new Map();
     for (const c of candidates) {
       const prev = byKey.get(c.dedupe_key);
       if (!prev || PRIORITY[c.priority] > PRIORITY[prev.priority]) byKey.set(c.dedupe_key, c);
     }
-    const sorted = [...byKey.values()].sort((a, b) => PRIORITY[b.priority] - PRIORITY[a.priority]);
     const out = [];
-    const usedGroups = new Set(); // at most one gap question per evaluation: ask, don't interrogate
-    for (const c of sorted) {
+    const usedGroups = new Set(); // at most one question per evaluation: suggest, don't interrogate
+    for (const c of [...byKey.values()].sort((a, b) => PRIORITY[b.priority] - PRIORITY[a.priority])) {
       const last = lastByKey.get(c.dedupe_key);
-      if (last !== undefined) {
-        const cd = c.cooldownMs ?? Infinity; // non-question alerts fire once per key
-        if (now - last < cd) continue;
-      }
+      if (last !== undefined && now - last < (c.cooldownMs ?? Infinity)) continue; // alerts fire once per key
       if (c.group && usedGroups.has(c.group)) continue;
       if (!c.bypassBudget && c.priority !== 'high') {
         if (budget <= 0) continue;

@@ -29,7 +29,7 @@ function fromContext(entry, contextSegments) {
  * Validate + post-process raw model output. Pure function (no I/O) so it can be
  * tested deterministically. Returns accepted items/fields plus rejections.
  */
-export function processExtraction(raw, { template, session, newSegments, contextSegments = [] }) {
+export function processExtraction(raw, { template, session, newSegments, contextSegments = [], knownFields = {} }) {
   const rejected = [];
   let parsed;
   try {
@@ -44,6 +44,7 @@ export function processExtraction(raw, { template, session, newSegments, context
   const dateCtx = { sessionStart: session.started_at, timezone: session.timezone };
 
   const items = [];
+  const linked = []; // accepted items that the model linked to a guideline point
   for (const it of parsed.items) {
     const ids = ground(it, segmentsById, allowedIds);
     if (!ids) {
@@ -70,6 +71,7 @@ export function processExtraction(raw, { template, session, newSegments, context
       source_segment_ids: ids,
       confidence: confidenceFor(certainty, reasons),
     });
+    linked.push({ link: it, item: items.at(-1) });
   }
 
   const fields = [];
@@ -98,8 +100,58 @@ export function processExtraction(raw, { template, session, newSegments, context
     });
   }
 
+  // Points of the guideline answered by an extracted statement (preferred path).
+  for (const { link, item } of linked) {
+    if (!link.field_key || !link.value || NULLISH.test(link.value.trim())) continue;
+    if (!fieldKeys.has(link.field_key) || fields.some((f) => f.key === link.field_key)) continue;
+    fields.push(fieldFrom(link.field_key, link.value, item, dateCtx));
+  }
+  // Safety net: the model may extract "la consegna è il 20 dicembre" without
+  // linking it to the point. Fill only points still unknown, from a sentence
+  // that names the point AND contains a value of the right type.
+  const known = new Set([...Object.keys(knownFields), ...fields.map((f) => f.key)]);
+  for (const f of template.fields.filter((x) => !known.has(x.key))) {
+    const hit = findTypedValue(f, newSegments);
+    if (!hit) continue;
+    const adj = adjustCertainty('certo', hit.sentence, hit.sentence);
+    fields.push({
+      key: f.key, value: hit.value, certainty: adj.certainty, status: statusFromCertainty(adj.certainty),
+      status_reason: ['collegato alla traccia dal sistema', ...adj.reasons].join('; '), quote: hit.sentence,
+      source_segment_ids: [hit.segmentId], due_date: f.type === 'date' ? resolveDate(hit.value, dateCtx) : null,
+      confidence: confidenceFor(adj.certainty, adj.reasons) - 0.1,
+    });
+  }
+
   const questions = parsed.questions.filter((q) => !q.field_key || fieldKeys.has(q.field_key));
   return { ok: true, items, fields, questions, rejected };
+}
+
+function fieldFrom(key, value, item, dateCtx) {
+  return {
+    key, value, certainty: item.certainty, status: item.status, status_reason: item.status_reason,
+    quote: item.quote, source_segment_ids: item.source_segment_ids, due_date: resolveDate(value, dateCtx), confidence: item.confidence,
+  };
+}
+
+const DATE_VALUE = words('\\d{1,2} (?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre)(?: \\d{4})?|\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?|lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica|dopodomani|domani|fine (?:del )?mese|(?:il )?mese prossimo|prossima settimana');
+
+/** Value of the point's type closest to one of its keywords, within one sentence. */
+export function findTypedValue(field, segments) {
+  const pattern = field.type === 'date' ? DATE_VALUE : field.type === 'money' ? MONEY : null;
+  if (!pattern || !field.keywords.length) return null;
+  const global = new RegExp(pattern.source, `${pattern.flags.replace('g', '')}g`);
+  for (const seg of segments) {
+    for (const sentence of seg.text.split(/(?<=[.!?])\s+/)) {
+      const lower = sentence.toLowerCase();
+      const kwPos = field.keywords.map((k) => lower.indexOf(k.toLowerCase())).filter((p) => p >= 0);
+      if (!kwPos.length) continue;
+      const values = [...sentence.matchAll(global)];
+      if (!values.length) continue;
+      const best = values.reduce((a, b) => (Math.min(...kwPos.map((p) => Math.abs(p - b.index))) < Math.min(...kwPos.map((p) => Math.abs(p - a.index))) ? b : a));
+      return { value: best[0].trim(), sentence: sentence.trim(), segmentId: seg.id };
+    }
+  }
+  return null;
 }
 
 // Qualitative, explained confidence; not a calibrated probability (F22).
@@ -128,11 +180,18 @@ const DECISION = /\b(abbiamo deciso|decidiamo|accetto|accettiamo|approvo|approvi
 const RISK = /\b(rischio|ritard\w*|problema|bloccat\w*|critic\w*)\b/i;
 const DUE = words('(?:entro (?:il |la |lo )?)?(?:lunedì|martedì|mercoledì|giovedì|venerdì|sabato|domenica|dopodomani|domani|fine (?:del )?mese|\\d{1,2} (?:gennaio|febbraio|marzo|aprile|maggio|giugno|luglio|agosto|settembre|ottobre|novembre|dicembre))');
 
-export function extractWithRules({ template, session, newSegments }) {
+export function extractWithRules({ template, session, newSegments, knownFields = {} }) {
   const items = [];
   const fields = [];
   const dateCtx = { sessionStart: session.started_at, timezone: session.timezone };
-  const fieldKeys = new Set(template.fields.map((f) => f.key));
+  for (const f of template.fields.filter((x) => !(x.key in knownFields))) {
+    const hit = findTypedValue(f, newSegments);
+    if (!hit) continue;
+    const adj = adjustCertainty('certo', hit.sentence, hit.sentence);
+    fields.push({ key: f.key, value: hit.value, certainty: adj.certainty, status: statusFromCertainty(adj.certainty),
+      status_reason: 'estrazione di riserva a regole', quote: hit.sentence, source_segment_ids: [hit.segmentId],
+      due_date: f.type === 'date' ? resolveDate(hit.value, dateCtx) : null, confidence: 0.3 });
+  }
   for (const seg of newSegments) {
     for (const sentence of seg.text.split(/(?<=[.!?])\s+/).filter((s) => s.trim().length > 3)) {
       const due = sentence.match(DUE)?.[0] ?? null;
@@ -149,20 +208,6 @@ export function extractWithRules({ template, session, newSegments }) {
           owner: null, due_text: due, due_date: resolveDate(due, dateCtx), conditions: null,
           quote: sentence.trim(), source_segment_ids: [seg.id], confidence: 0.3,
         });
-      }
-      const money = sentence.match(MONEY)?.[0];
-      if (money) {
-        const key = /budget/i.test(sentence) && fieldKeys.has('budget') ? 'budget' : fieldKeys.has('prezzo') ? 'prezzo' : null;
-        if (key) {
-          const adj = adjustCertainty('certo', sentence, sentence);
-          fields.push({ key, value: money, certainty: adj.certainty, status: statusFromCertainty(adj.certainty),
-            status_reason: 'estrazione di riserva a regole', quote: sentence.trim(), source_segment_ids: [seg.id], due_date: null, confidence: 0.3 });
-        }
-      }
-      if (due && /consegn/i.test(sentence) && fieldKeys.has('data_consegna')) {
-        const adj = adjustCertainty('certo', sentence, sentence);
-        fields.push({ key: 'data_consegna', value: due, certainty: adj.certainty, status: statusFromCertainty(adj.certainty),
-          status_reason: 'estrazione di riserva a regole', quote: sentence.trim(), source_segment_ids: [seg.id], due_date: resolveDate(due, dateCtx), confidence: 0.3 });
       }
     }
   }

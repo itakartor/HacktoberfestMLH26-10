@@ -1,24 +1,12 @@
 {
   "id": "riunione",
-  "name": "Riunione di lavoro — impegni e scadenze",
-  "version": 1,
-  "description": "Caso d'uso circoscritto raccomandato: estrazione di impegni, scadenze, decisioni e domande aperte.",
-  "context": "Chiamata di lavoro tra colleghi o con un fornitore.",
-  "goal": "Uscire dalla chiamata sapendo chi fa cosa ed entro quando, con le questioni aperte esplicite.",
-  "mode": "monitoraggio",
-  "look_for": ["impegni con responsabile e scadenza", "decisioni prese o rimandate", "domande rimaste senza risposta", "dipendenze tra attività"],
-  "fields": [
-    { "key": "obiettivo", "label": "Obiettivo della chiamata", "description": "lo scopo dichiarato dell'incontro", "required": true, "question": "Qual è l'obiettivo principale di questa chiamata?" },
-    { "key": "prossimo_incontro", "label": "Prossimo incontro", "description": "data/ora del prossimo contatto o follow-up", "required": true, "question": "Quando ci risentiamo per fare il punto?" },
-    { "key": "responsabile_principale", "label": "Responsabile principale", "description": "chi coordina o ha in carico l'attività principale", "required": false, "question": "Chi è il responsabile principale dell'attività?" }
-  ],
-  "rules": [
-    { "id": "impegno_da_confermare", "priority": "medium", "when": { "kind": "commitment", "certainty_in": ["certo", "condizionato"] }, "then": { "type": "question", "message": "Impegno rilevato: confermare responsabile e scadenza precisa." } },
-    { "id": "impegno_ipotetico", "priority": "low", "when": { "kind": "commitment", "certainty_in": ["ipotetico", "ambiguo"] }, "then": { "type": "alert", "message": "Impegno solo ipotetico: non registrato come confermato." } }
-  ],
-  "feedback": { "live_questions": true, "max_live_suggestions_per_minute": 3 },
-  "escalation": { "require_human_confirmation_for": ["commitment", "decision"] },
-  "tests": [
-    { "input": "Ti invio il preventivo entro venerdì e poi ci sentiamo lunedì per decidere.", "expect": { "commitment": "inviare il preventivo", "due_text": "venerdì" } }
+  "nome": "Riunione di lavoro",
+  "descrizione": "Chiamata tra colleghi o con un fornitore.",
+  "obiettivo": "Uscire dalla chiamata sapendo chi fa cosa ed entro quando, con le questioni aperte esplicite.",
+  "versione": 2,
+  "punti": [
+    { "punto": "Obiettivo", "domanda": "Qual è l'obiettivo principale di questa chiamata?" },
+    { "punto": "Prossimo incontro", "domanda": "Quando ci risentiamo per fare il punto?" },
+    { "punto": "Responsabile", "domanda": "Chi segue l'attività principale?" }
   ]
 }

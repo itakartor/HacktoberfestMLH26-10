@@ -193,12 +193,13 @@ Tutte le variabili sono facoltative tranne la chiave STT, che serve per l'audio 
 | `EXTRACTION_DEBOUNCE_MS` | `2500` | Attesa prima di analizzare i nuovi segmenti |
 | `EXTRACTION_MAX_BATCH` | `3` | Segmenti che fanno partire subito l'analisi |
 | `CONTEXT_WINDOW_SEGMENTS` | `10` | Segmenti precedenti passati come contesto |
-| `SUGGESTION_COOLDOWN_MS` | `20000` | Cooldown generale dei suggerimenti |
+| `MAX_SUGGESTIONS_PER_MINUTE` | `3` | Suggerimenti non urgenti al minuto (gli alert urgenti passano sempre) |
 | `FIELD_QUESTION_COOLDOWN_MS` | `90000` | Tempo prima di riproporre la stessa domanda |
-| `MIN_SEGMENTS_BEFORE_QUESTIONS` | `3` | Segmenti minimi prima di chiedere i campi mancanti |
+| `MIN_SEGMENTS_BEFORE_QUESTIONS` | `3` | Senza Gemma: segmenti minimi prima di proporre le domande guida |
 | `SEARCH_MIN_SIMILARITY` | `0.35` | Soglia della ricerca semantica |
 | `POSTGRES_PASSWORD` | `convintel` | Solo Docker: password del database |
 | `OLLAMA_DATA` | volume `ollama` | Solo Docker: cartella host con i modelli |
+| `TEMPLATES_DIR` | `templates/` (Docker: volume) | Dove vengono salvati i template creati dalla UI |
 
 ---
 

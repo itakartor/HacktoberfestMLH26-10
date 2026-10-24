@@ -1,0 +1,23 @@
+{
+  "id": "operativo",
+  "name": "Coordinamento operativo",
+  "version": 1,
+  "description": "Mette in evidenza materiali, dipendenze, scadenze intermedie e responsabili.",
+  "context": "Chiamata di pianificazione operativa di un progetto o di una consegna.",
+  "goal": "Rendere esplicite le dipendenze e le scadenze intermedie da cui dipende la consegna.",
+  "mode": "verifica",
+  "look_for": ["materiali o input necessari", "scadenze intermedie", "dipendenze", "responsabili delle attività", "blocchi"],
+  "fields": [
+    { "key": "materiali", "label": "Materiali/input necessari", "description": "cosa serve ricevere per procedere", "required": true, "question": "Quali materiali servono e chi li fornisce?" },
+    { "key": "scadenza_materiali", "label": "Scadenza materiali", "description": "entro quando devono arrivare i materiali", "required": true, "critical": true, "question": "Entro quando devono arrivare i materiali?" },
+    { "key": "data_consegna", "label": "Data di consegna", "description": "data di consegna finale", "required": true, "question": "Qual è la data di consegna finale?" },
+    { "key": "responsabile_principale", "label": "Responsabile", "description": "chi coordina l'attività", "required": false, "question": "Chi coordina l'attività?" }
+  ],
+  "rules": [
+    { "id": "dipendenza_scadenza", "priority": "high", "when": { "text_matches": "\\bse (riceviamo|arriva|arrivano|ci mandate)|a patto che|purché" }, "then": { "type": "alert", "message": "Dipendenza rilevata: la consegna dipende da un input esterno, tracciarne la scadenza." } },
+    { "id": "blocco", "priority": "high", "when": { "text_matches": "bloccat|siamo fermi|in attesa di" }, "then": { "type": "alert", "message": "Possibile blocco operativo: identificare il responsabile dello sblocco." } }
+  ],
+  "feedback": { "live_questions": true, "max_live_suggestions_per_minute": 3 },
+  "escalation": { "require_human_confirmation_for": ["data_consegna"] },
+  "tests": []
+}

@@ -1,0 +1,27 @@
+{
+  "id": "commerciale",
+  "name": "Trattativa commerciale / preventivo",
+  "version": 1,
+  "description": "Mette in evidenza prezzo, budget, condizioni di consegna e accordi condizionati.",
+  "context": "Chiamata con un cliente o fornitore per definire un preventivo.",
+  "goal": "Raccogliere i dati necessari a un preventivo affidabile senza scambiare un interesse per un accordo.",
+  "mode": "esplorativa",
+  "look_for": ["prezzo proposto o richiesto", "budget del cliente", "condizioni e tempi di consegna", "accettazioni, rifiuti e condizioni", "diritti e licenze"],
+  "fields": [
+    { "key": "prezzo", "label": "Prezzo", "description": "prezzo proposto o concordato, con valuta", "required": true, "critical": true, "question": "Il prezzo è confermato? Qual è l'importo esatto?" },
+    { "key": "budget", "label": "Budget cliente", "description": "budget disponibile dichiarato dal cliente", "required": true, "critical": true, "question": "Quale budget dobbiamo considerare?" },
+    { "key": "data_consegna", "label": "Data di consegna", "description": "data di consegna richiesta o promessa", "required": true, "question": "Qual è la data di consegna richiesta?" },
+    { "key": "data_avvio", "label": "Data di avvio", "description": "quando parte il progetto", "required": false, "question": "Quale data di avvio dobbiamo considerare?" },
+    { "key": "decisore", "label": "Decisore", "description": "chi approva lato cliente", "required": false, "question": "Chi approva il preventivo dal vostro lato?" }
+  ],
+  "rules": [
+    { "id": "prezzo_non_confermato", "priority": "high", "when": { "field": "prezzo", "status_in": ["ambiguo", "contestato"] }, "then": { "type": "alert", "message": "Prezzo non confermato: chiedere conferma esplicita prima di procedere." } },
+    { "id": "accordo_condizionato", "priority": "high", "when": { "kind": "decision", "certainty_in": ["condizionato"] }, "then": { "type": "alert", "message": "Accettazione condizionata: registrata come NON definitiva finché le condizioni non sono verificate." } },
+    { "id": "sconto", "priority": "medium", "when": { "text_matches": "sconto|ribasso|più basso|meno caro" }, "then": { "type": "alert", "message": "Richiesta di sconto: verificare margine e impatto sulle condizioni." } }
+  ],
+  "feedback": { "live_questions": true, "max_live_suggestions_per_minute": 3 },
+  "escalation": { "require_human_confirmation_for": ["prezzo", "budget", "decision"] },
+  "tests": [
+    { "input": "Possiamo consegnare a dicembre, se riceviamo i materiali entro il 15 novembre. Il prezzo è ancora da confermare.", "expect": { "prezzo": "ambiguo", "data_consegna": "condizionato" } }
+  ]
+}

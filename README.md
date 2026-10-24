@@ -10,7 +10,7 @@ e li conserva come memoria verificabile, sempre collegata alla frase da cui deri
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
 ![ElevenLabs](https://img.shields.io/badge/STT-ElevenLabs_Scribe-000000)
 ![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)
-![Tests](https://img.shields.io/badge/test-46%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/test-51%20passing-brightgreen)
 
 <img src="docs/screenshots/demo-live.gif" alt="Demo: trascrizione live, alert e scheda che si compilano durante la chiamata" width="900">
 
@@ -37,8 +37,8 @@ non diventano mai fatti.
 | 🎧 **Trascrizione live** | Microfono e audio della scheda (Meet/Teams/Zoom web) come canali separati, con testo provvisorio sostituito da quello definitivo. |
 | 🧠 **Estrazione con Gemma** | Impegni, decisioni, scadenze, rischi e campi del template, con citazione, fonte, stato e confidenza motivata. |
 | 🛡️ **Guardrail** | Accordi condizionati, autocorrezioni («cinquemila, anzi cinquantamila»), negazioni e istruzioni ostili pronunciate in chiamata vengono riconosciuti. |
-| 🔔 **Feedback adattivo** | Domande e alert solo quando il template lo giustifica, con priorità, deduplica e cooldown. |
-| 🗂️ **Template configurabili** | Commerciale, operativo, decisionale, riunione. Sono JSON versionati e modificabili dalla UI. |
+| 🔔 **Domande al momento giusto** | Al massimo una domanda alla volta, riformulata sul contesto e mai su ciò che è già stato detto; alert solo per conflitti, accordi condizionati e istruzioni ostili. |
+| 🗂️ **Template come traccia** | Un template è solo obiettivo e punti da toccare, ciascuno con una domanda guida. Si crea dalla UI in un minuto e Gemma lo usa come linea guida. |
 | 📑 **Report post-chiamata** | Sintesi, cose da verificare, confronto con le chiamate precedenti e con i documenti, export in Markdown. |
 | 🔎 **Archivio** | Domande in linguaggio naturale su tutte le conversazioni e i documenti, con le fonti; se le evidenze non bastano, lo dice. |
 | 📄 **Documenti e import** | Listini, contratti e note (.txt, .md, .pdf) come fonti di riferimento; import di conversazioni passate da testo. |
@@ -71,7 +71,7 @@ Tutte le opzioni, le varianti per macOS e Linux e la risoluzione dei problemi so
 <table>
 <tr>
 <td width="50%"><img src="docs/screenshots/live.jpg" alt="Vista live"><br><sub><b>Live</b>: trascrizione per parlante, alert collegati alla fonte (accordo condizionato, istruzione ostile, sconto)</sub></td>
-<td width="50%"><img src="docs/screenshots/schede.png" alt="Scheda e informazioni estratte"><br><sub><b>Scheda del template</b> e informazioni estratte, con stato, certezza, citazione e fonte</sub></td>
+<td width="50%"><img src="docs/screenshots/schede.png" alt="Scheda e informazioni estratte"><br><sub><b>Traccia della chiamata</b> e informazioni estratte, con stato, certezza, citazione e fonte</sub></td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/report.png" alt="Report post-chiamata"><br><sub><b>Report post-chiamata</b>: sintesi di Gemma (da verificare) e scheda consolidata</sub></td>
@@ -109,7 +109,7 @@ I dettagli (flussi, modello dati, guardrail, scelte tecniche) sono in **[ARCHITE
 ## Test
 
 ```bash
-npm test          # 46 test deterministici: parziali, idempotenza, guardrail, isolamento, correzioni, import…
+npm test          # 51 test deterministici: parziali, idempotenza, guardrail, isolamento, correzioni, import…
 npm run e2e:stt   # percorso audio reale: voce italiana sintetica → ElevenLabs → Gemma (server avviato)
 ```
 

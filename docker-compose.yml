@@ -71,12 +71,13 @@ services:
       LLM_MODEL: ${LLM_MODEL:-gemma4:e4b-it-qat}
       EMBED_MODEL: ${EMBED_MODEL:-embeddinggemma}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-180000}
+      TEMPLATES_DIR: /app/data/templates   # template salvati dalla UI (volume); quelli di base sono nell'immagine
     ports:
       - "${APP_PORT:-3000}:3000"
     volumes:
-      - templates:/app/templates
+      - user-templates:/app/data/templates
 
 volumes:
   pgdata:
   ollama:
-  templates:
+  user-templates:

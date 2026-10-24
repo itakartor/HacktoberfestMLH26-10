@@ -239,3 +239,12 @@ main { padding: 20px; min-width: 0; }
 .src-documento { background: var(--st-green-bg); color: var(--st-green); }
 code { font-family: ui-monospace, Consolas, monospace; font-size: 12px; background: var(--surface-2); padding: 1px 4px; border-radius: 4px; }
 @media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
+
+/* Session list: trash button */
+.sessions li { display: flex; align-items: flex-start; gap: 6px; }
+.sessions .s-main { flex: 1; min-width: 0; }
+.sessions .trash { background: none; border: 1px solid transparent; padding: 2px 6px; font-size: 13px; line-height: 1.2; opacity: 0; transition: opacity .15s; white-space: nowrap; }
+.sessions li:hover .trash, .sessions li.active .trash, .sessions .trash:focus-visible, .sessions .trash.armed { opacity: 1; }
+.sessions .trash:hover { border-color: var(--danger); }
+.sessions .trash.armed { color: var(--danger); border-color: var(--danger); font-size: 12px; }
+@media (hover: none) { .sessions .trash { opacity: .7; } }
