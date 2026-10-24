@@ -1,0 +1,12 @@
+{
+  "id": "operativo-consegna",
+  "title": "Pianificazione consegna materiali",
+  "template": "operativo",
+  "description": "Stessa frase dei test TC12 con dipendenze e prezzo da confermare; utile per confrontare template diversi.",
+  "lines": [
+    { "speaker": "Fornitore", "text": "Possiamo consegnare a dicembre, se riceviamo i materiali entro il 15 novembre. Il prezzo è ancora da confermare." },
+    { "speaker": "Io", "text": "I materiali sono le foto prodotto e i testi tradotti. Li fornisce il nostro ufficio marketing." },
+    { "speaker": "Fornitore", "text": "Al momento siamo fermi in attesa dei file di stampa." },
+    { "speaker": "Io", "text": "Mi occupo io di sollecitare il marketing entro domani." }
+  ]
+}

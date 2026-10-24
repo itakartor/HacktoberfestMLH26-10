@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Conversation Intelligence</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◉</span>
+      <div>
+        <strong>Conversation Intelligence</strong>
+        <small>STT live · Gemma · memoria verificabile</small>
+      </div>
+    </div>
+    <div id="health" class="health"></div>
+    <label class="user-select">Utente
+      <select id="user"></select>
+    </label>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <details id="new-session-box" open>
+        <summary>Nuova conversazione</summary>
+        <form id="new-session">
+          <label>Titolo <input name="title" required placeholder="Es. Chiamata preventivo Rossi"></label>
+          <label>Progetto <input name="project" value="default" required></label>
+          <label>Template <select name="templateId" id="template-select"></select></label>
+          <label>Contesto <textarea name="context" rows="2" placeholder="Facoltativo"></textarea></label>
+          <label class="check"><input type="checkbox" name="consent" required> I partecipanti sono informati e la registrazione è autorizzata</label>
+          <button type="submit" class="primary">Crea sessione</button>
+        </form>
+      </details>
+      <h3>Conversazioni</h3>
+      <ul id="sessions" class="sessions"></ul>
+    </aside>
+
+    <main id="main">
+      <section id="empty" class="empty">
+        <h2>Crea o seleziona una conversazione</h2>
+        <p>Usa il microfono e/o l'audio della scheda della chiamata (Meet, Teams, Zoom web) per la trascrizione live,
+          oppure lancia uno <em>scenario demo</em> per vedere la pipeline completa senza audio.</p>
+        <ol class="howto">
+          <li>Crea una sessione (serve la conferma del consenso).</li>
+          <li>Avvia l'audio, o uno scenario demo.</li>
+          <li>Guarda trascrizione, schede, domande suggerite e alert in tempo reale.</li>
+          <li>Termina la chiamata per ottenere il report post-chiamata.</li>
+        </ol>
+      </section>
+
+      <section id="session" hidden>
+        <div class="session-head">
+          <div>
+            <h2 id="s-title"></h2>
+            <div id="s-meta" class="meta"></div>
+          </div>
+          <div class="session-actions">
+            <button id="btn-complete" class="danger">Termina chiamata</button>
+            <button id="btn-delete" class="ghost" title="Elimina sessione e tutti i dati derivati">Elimina</button>
+          </div>
+        </div>
+
+        <nav class="tabs" role="tablist">
+          <button data-tab="live" class="active">Live</button>
+          <button data-tab="report">Report</button>
+          <button data-tab="ask">Chiedi all'archivio</button>
+          <button data-tab="metrics">Metriche</button>
+          <button data-tab="templates">Template</button>
+        </nav>
+
+        <div class="tab" id="tab-live">
+          <div class="controls">
+            <div class="group">
+              <label class="check"><input type="checkbox" id="ch-mic" checked> Microfono <small>(Io)</small></label>
+              <label class="check"><input type="checkbox" id="ch-tab"> Audio scheda <small>(Interlocutore)</small></label>
+              <button id="btn-audio" class="primary">● Avvia audio</button>
+              <span id="ch-status" class="ch-status"></span>
+            </div>
+            <div class="group">
+              <select id="scenario"></select>
+              <button id="btn-demo">▶ Scenario demo</button>
+            </div>
+            <div class="group">
+              <label>Template <select id="live-template"></select></label>
+            </div>
+          </div>
+          <div id="banner" class="banner" hidden></div>
+
+          <div class="live-grid">
+            <div class="panel transcript-panel">
+              <div class="panel-head">
+                <h3>Trascrizione</h3>
+                <span class="legend"><i class="dot partial"></i>provvisoria <i class="dot final"></i>definitiva <i class="dot corrected"></i>corretta</span>
+              </div>
+              <div id="transcript" class="transcript" aria-live="polite"></div>
+            </div>
+
+            <div class="side-col">
+              <div class="panel">
+                <div class="panel-head"><h3>Suggerimenti e alert</h3></div>
+                <ul id="suggestions" class="suggestions"></ul>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>Scheda del template</h3><span id="completeness" class="pill"></span></div>
+                <table id="fields" class="fields"></table>
+              </div>
+              <div class="panel">
+                <div class="panel-head"><h3>Informazioni estratte</h3><span id="quarantine" class="muted small"></span></div>
+                <div id="items"></div>
+              </div>
+            </div>
+          </div>
+          <details class="legend-box">
+            <summary>Legenda stati</summary>
+            <ul>
+              <li><span class="st st-non_specificato">non specificato</span> il template lo richiede ma non è stato detto</li>
+              <li><span class="st st-ambiguo">ambiguo</span> formulazione vaga, ipotetica o condizionata</li>
+              <li><span class="st st-da_verificare">da verificare</span> dichiarato chiaramente, non ancora confermato da una persona</li>
+              <li><span class="st st-confermato">confermato</span> confermato da un utente</li>
+              <li><span class="st st-contestato">contestato</span> in conflitto con un'altra dichiarazione</li>
+              <li><span class="st st-superato">superato</span> sostituito da un aggiornamento o da una correzione della fonte</li>
+            </ul>
+            <p class="muted small">Una dichiarazione non diventa un fatto solo perché è stata salvata o ripetuta dal modello.</p>
+          </details>
+        </div>
+
+        <div class="tab" id="tab-report" hidden>
+          <div class="report-actions">
+            <a id="btn-md" class="button" download>Scarica Markdown</a>
+          </div>
+          <div id="report"></div>
+        </div>
+
+        <div class="tab" id="tab-ask" hidden>
+          <form id="ask-form" class="ask-form">
+            <input id="ask-q" placeholder="Es. Quale scadenza era stata concordata per il preventivo?" required>
+            <select id="ask-scope">
+              <option value="session">Questa conversazione</option>
+              <option value="project">Questo progetto</option>
+              <option value="all">Tutto il mio archivio</option>
+            </select>
+            <button class="primary">Chiedi</button>
+          </form>
+          <div id="answer"></div>
+        </div>
+
+        <div class="tab" id="tab-metrics" hidden>
+          <p class="muted">Latenze misurate su questa macchina (mediana e p95). Sono misure, non garanzie.</p>
+          <div id="metrics"></div>
+        </div>
+
+        <div class="tab" id="tab-templates" hidden>
+          <p class="muted">I template sono dati versionati: modificarli non richiede di toccare codice o prompt. Salvare un id esistente crea una nuova versione (la precedente resta in archivio e le sessioni conservano la versione usata).</p>
+          <div class="tpl-grid">
+            <ul id="tpl-list" class="tpl-list"></ul>
+            <div>
+              <textarea id="tpl-json" rows="24" spellcheck="false"></textarea>
+              <div class="row"><button id="tpl-save" class="primary">Salva template</button><span id="tpl-msg" class="small"></span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <script src="app.js" type="module"></script>
+</body>
+</html>

@@ -1,6 +1,20 @@
 # HacktoberfestMLH26-10
 
 Telegram Group: https://t.me/+0vPSzpntHicyOGQ0
+## ▶ Prototipo: come avviarlo
+
+```powershell
+.\setup.ps1      # solo la prima volta: installa Ollama, scarica Gemma, npm install, crea .env
+.\start.ps1      # avvia Ollama + server Node e apre http://localhost:3000   (oppure doppio clic su start.cmd)
+.\stop.ps1       # ferma server Node + Ollama  (-KeepOllama lascia Ollama acceso; oppure doppio clic su stop.cmd)
+```
+
+Componenti: **server Node.js** (`npm start`, porta 3000, PostgreSQL + pgvector embedded via PGlite, niente Docker),
+**Ollama** (porta 11434) con `gemma4:e4b-it-qat` ed `embeddinggemma`, **ElevenLabs** Scribe v2 Realtime per lo STT
+(chiave in `.env` → `ELEVENLABS_API_KEY`).
+Altri comandi: `npm test` (40 test), `npm run seed` (dati demo), `npm run e2e:stt` (test audio reale), `npm run check`.
+Documentazione completa del prototipo: **[PROTOTIPO.md](PROTOTIPO.md)**.
+
 
 # Prompt master --- Real-Time Conversation Intelligence System
 

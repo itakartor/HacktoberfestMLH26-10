@@ -1,0 +1,14 @@
+{
+  "id": "preventivo-b",
+  "title": "Preventivo sito web — follow-up",
+  "template": "commerciale",
+  "description": "Seconda chiamata dello stesso progetto: data di consegna spostata e prezzo aggiornato (TC06, FC06). Da eseguire dopo 'preventivo-a' nello stesso progetto per vedere il confronto tra sessioni.",
+  "lines": [
+    { "speaker": "Io", "text": "Ciao Marco, ti chiamo per il follow-up sul preventivo che ti ho mandato venerdì." },
+    { "speaker": "Cliente", "text": "Sì, l'abbiamo letto. La consegna è stata spostata al 17 dicembre, perché il catalogo arriva più tardi." },
+    { "speaker": "Cliente", "text": "Sul prezzo: accetto quarantottomila euro, purché la consegna sia entro il 17 dicembre." },
+    { "speaker": "Io", "text": "Per me va bene. Mi occupo io di aggiornare il contratto entro mercoledì." },
+    { "speaker": "Cliente", "text": "Non approvo invece la manutenzione annuale da cinquemila euro, quella la togliamo." },
+    { "speaker": "Cliente", "text": "Chi approva lato nostro è la direttrice, Laura Bianchi." }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "id": "riunione-progetto",
+  "title": "Riunione di avanzamento progetto",
+  "template": "riunione",
+  "description": "Impegni, scadenze, ambiguità e responsabili solo nominati (TC03, TC05, TC17, FC04).",
+  "lines": [
+    { "speaker": "Io", "text": "L'obiettivo di oggi è allineare le attività per il rilascio della nuova app." },
+    { "speaker": "Collega", "text": "Il backend dovrebbe essere pronto verso la fine del mese, credo." },
+    { "speaker": "Io", "text": "Perfetto. Io preparo il piano di test entro giovedì." },
+    { "speaker": "Collega", "text": "Potremmo chiedere a Giulia di occuparsi della documentazione." },
+    { "speaker": "Io", "text": "Abbiamo deciso di rimandare la funzione di pagamento alla versione due." },
+    { "speaker": "Collega", "text": "Chi si occupa dei rapporti con il fornitore delle API? Non l'abbiamo ancora deciso." },
+    { "speaker": "Io", "text": "Ci sentiamo domani alle nove per fare il punto." }
+  ]
+}
