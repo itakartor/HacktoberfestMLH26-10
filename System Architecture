@@ -1,0 +1,38 @@
+# System Architecture
+
+Questo documento contiene tutte le informazioni relativi allo stack tecnico e l'architettura del sistema.
+
+## Database Tech Stack
+
+Documento di specifica per il layer di persistenza e memorizzazione vettoriale del progetto.
+
+---
+
+### 1. Componenti Principali
+
+| Componente | Tecnologia | Ruolo e Motivazione |
+| :--- | :--- | :--- |
+| **Database Core** | **PostgreSQL 16+** | Gestione unificata di dati relazionali, schede JSON e integrità referenziale (ACID). |
+| **Vector Extension** | **pgvector** | Ricerca vettoriale nativa (similarity search) integrata direttamente nelle query SQL. |
+| **Node.js Driver / DAL** | **`pg` (node-postgres)**<br>*(Opzionale: Drizzle ORM)* | Connessione via pooling (`pg.Pool`), esecuzione query tipizzate e supporto raw SQL per operatori vettoriali. |
+| **Document & Metadata Store** | **JSONB Nativo** | Salvataggio flessibile di clausole, metadati variabili e output strutturati estratti da Gemma. |
+
+---
+
+### 2. Indicizzazione e Algoritmi
+
+- **Metrica di Distanza:** Distanza del Coseno (`vector_cosine_ops` / operatore `<=>`).
+- **Indice Vettoriale:** **HNSW** (*Hierarchical Navigable Small World*)
+  - Configurazione: `m = 16`, `ef_construction = 64`.
+  - Runtime parameter: `hnsw.ef_search = 40` (alto recall con latenza < 20ms).
+- **Indici Tradizionali:**
+  - **B-Tree:** Su chiavi primarie, foreign key e campi categorici (`project_type`, `created_at`).
+  - **GIN:** Su colonne `JSONB` e array di testo per filtri veloci su clausole e tag.
+
+---
+
+### 3. Ambienti di Deployment
+
+- **Ambiente Locale (Sviluppo & Demo Offline):**
+  - Container Docker ufficiale: `pgvector/pgvector:pg16`
+  - Persistenza tramite Docker Named Volume.
